@@ -1,0 +1,6 @@
+{
+  "name": "FAITHTRACK",
+  "description": "A modern Church Member Management, Activities, Attendance, and Communication Platform.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
