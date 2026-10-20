@@ -1,9 +1,80 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read and write for FaithTrack application collections
+
+    // Authentication & authorization helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.role == 'super_admin' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_admin'])
+      );
+    }
+
+    // 1. Church Activities & Events: Publicly readable for service schedules; managed by admins
+    match /events/{eventId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // 2. Announcements & Bulletins: Publicly viewable; managed by church leadership
+    match /announcements/{announcementId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // 3. Ministry Departments: Viewable by congregation; managed by leadership
+    match /departments/{departmentId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // 4. Fellowship & Cell Groups: Viewable by congregation; managed by leadership
+    match /groups/{groupId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // 5. Church Settings: Viewable for congregation parameters; updateable by leadership
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // 6. Attendance Records: Self-service check-in during services; update/delete restricted
+    match /attendance/{attendanceId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isSignedIn();
+    }
+
+    // 7. Users: User account documents
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isSignedIn() && (isOwner(userId) || isAdmin());
+    }
+
+    // 8. Members: Member registry records
+    match /members/{memberId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    // Default deny for all other collections
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
