@@ -26,7 +26,11 @@ import {
   MapPin, 
   CheckCircle2, 
   XCircle,
-  AlertTriangle
+  AlertTriangle,
+  Bell,
+  Mail,
+  Send,
+  RefreshCw
 } from 'lucide-react';
 import { formatDateReadable, formatTime12Hour } from '../../lib/utils';
 import { EventsManagementSkeleton } from '../ui/Skeleton';
@@ -60,6 +64,44 @@ export const EventsManagement: React.FC = () => {
     expectedCount: 400
   });
 
+  // Background Notifier State
+  const [notifierStatus, setNotifierStatus] = useState<any>(null);
+  const [checkingReminders, setCheckingReminders] = useState(false);
+  const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
+  const [recentDispatches, setRecentDispatches] = useState<any[]>([]);
+
+  const fetchNotifierStatus = async () => {
+    try {
+      const res = await fetch('/api/notifications/status');
+      if (res.ok) {
+        const data = await res.json();
+        setNotifierStatus(data);
+        if (data.recentDispatchedEmails) {
+          setRecentDispatches(data.recentDispatchedEmails);
+        }
+      }
+    } catch {}
+  };
+
+  const handleRunCheckNow = async () => {
+    setCheckingReminders(true);
+    try {
+      const res = await fetch('/api/notifications/run-check', { method: 'POST' });
+      const data = await res.json();
+      if (data.success && data.result) {
+        setFeedbackMessage(data.result.message || 'Background check completed successfully.');
+        fetchNotifierStatus();
+      } else {
+        setFeedbackMessage('Background check completed.');
+      }
+      setTimeout(() => setFeedbackMessage(''), 5000);
+    } catch (err) {
+      console.error('Trigger check failed:', err);
+    } finally {
+      setCheckingReminders(false);
+    }
+  };
+
   const fetchEvents = async () => {
     try {
       const snap = await getDocs(collection(db, 'events'));
@@ -75,6 +117,7 @@ export const EventsManagement: React.FC = () => {
 
   useEffect(() => {
     fetchEvents();
+    fetchNotifierStatus();
   }, []);
 
   const handleOpenCreate = () => {
@@ -275,6 +318,65 @@ export const EventsManagement: React.FC = () => {
           <span>{feedbackMessage}</span>
         </div>
       )}
+
+      {/* Automated Reminders Engine Card */}
+      <Card className="p-5 bg-gradient-to-r from-slate-900 to-teal-950 text-white border-slate-800 shadow-sm space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="flex h-2.5 w-2.5 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="text-xs font-bold text-emerald-300 tracking-wide uppercase">
+                Automated Background Reminder Engine
+              </span>
+              <span className="text-[10px] text-slate-300 bg-white/10 px-2 py-0.5 rounded-full">
+                Active • Scans Every {notifierStatus?.intervalMinutes || 5} Min
+              </span>
+            </div>
+            <h3 className="text-base font-bold text-white tracking-tight">
+              Proactive Activity Reminders (Email & Push)
+            </h3>
+            <p className="text-xs text-slate-300">
+              Scans upcoming services within 48 hours and automatically triggers personalized email receipts and push alerts to registered congregation members.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              icon={<Mail className="w-3.5 h-3.5 text-teal-300" />}
+              onClick={() => setIsDispatchModalOpen(true)}
+              className="text-xs text-white border-white/20 hover:bg-white/10 hover:text-white"
+            >
+              Email Delivery Logs ({recentDispatches.length})
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              icon={<Send className="w-3.5 h-3.5" />}
+              onClick={handleRunCheckNow}
+              loading={checkingReminders}
+              className="text-xs font-bold shadow-md shadow-emerald-500/20"
+            >
+              Run Check Now
+            </Button>
+          </div>
+        </div>
+
+        {notifierStatus?.lastRunAt && (
+          <div className="pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+            <span>Last Scan: {formatDateReadable(notifierStatus.lastRunAt.split('T')[0])} at {formatTime12Hour(notifierStatus.lastRunAt.split('T')[1].substring(0, 5))}</span>
+            <span className="text-emerald-300 font-medium">
+              Total Reminders Delivered: {notifierStatus.totalHistoricalReminders || 0}
+            </span>
+          </div>
+        )}
+      </Card>
 
       {/* Events List */}
       <div className="space-y-4">
@@ -575,6 +677,75 @@ export const EventsManagement: React.FC = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* EMAIL DISPATCHES MODAL */}
+      <Modal
+        isOpen={isDispatchModalOpen}
+        onClose={() => setIsDispatchModalOpen(false)}
+        title="Automated Email Delivery Receipts"
+        maxWidth="lg"
+      >
+        <div className="space-y-4">
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between text-xs">
+            <span className="text-slate-600 font-medium">
+              Real-time audit log of automated service reminders dispatched to registered members.
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              icon={<RefreshCw className="w-3.5 h-3.5" />}
+              onClick={fetchNotifierStatus}
+              className="shrink-0 text-xs py-1"
+            >
+              Refresh
+            </Button>
+          </div>
+
+          <div className="divide-y divide-slate-100 max-h-[60vh] overflow-y-auto">
+            {recentDispatches.length > 0 ? (
+              recentDispatches.map((log: any) => (
+                <div key={log.id} className="py-3 px-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-900">{log.recipientName}</span>
+                      <span className="text-slate-400 font-mono text-[11px]">&lt;{log.recipientEmail}&gt;</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        {log.status === 'delivered' ? 'Delivered ✓' : log.status}
+                      </span>
+                    </div>
+                    <p className="text-slate-700 font-medium">{log.subject}</p>
+                    <p className="text-slate-500 text-[11px] line-clamp-1">{log.snippet}</p>
+                  </div>
+                  <div className="text-left sm:text-right shrink-0 text-slate-400 text-[10px]">
+                    <span>{formatDateReadable(log.dispatchedAt.split('T')[0])}</span>
+                    <span className="block">{formatTime12Hour(log.dispatchedAt.split('T')[1].substring(0, 5))}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="py-12 text-center text-slate-400">
+                <Mail className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+                <p className="text-sm font-semibold text-slate-600">No email reminders dispatched yet.</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Click "Run Check Now" to scan upcoming activities and trigger reminders.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2 border-t border-slate-100 flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              onClick={() => setIsDispatchModalOpen(false)}
+            >
+              Close
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

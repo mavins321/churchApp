@@ -12,6 +12,7 @@ import { Megaphone, Plus, Edit, Trash2, CheckCircle2, ShieldCheck, Send } from '
 import { useAuth } from '../../contexts/AuthContext';
 import { INITIAL_DEPARTMENTS, INITIAL_GROUPS } from '../../lib/seedData';
 import { AnnouncementsViewSkeleton } from '../ui/Skeleton';
+import { staleWhileRevalidate, invalidateCache } from '../../lib/cache';
 
 export const AnnouncementsView: React.FC = () => {
   const { role, userProfile } = useAuth();
@@ -36,10 +37,17 @@ export const AnnouncementsView: React.FC = () => {
 
   const fetchAnnouncements = async () => {
     try {
-      const snap = await getDocs(query(collection(db, 'announcements')));
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Announcement));
-      list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-      setAnnouncements(list);
+      await staleWhileRevalidate('announcements_view_list', async () => {
+        const snap = await getDocs(query(collection(db, 'announcements')));
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Announcement));
+        list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        return list;
+      }, (list, fromCache) => {
+        setAnnouncements(list);
+        if (fromCache) {
+          setLoading(false);
+        }
+      });
     } catch (err) {
       console.error('Error fetching announcements:', err);
     } finally {
@@ -78,6 +86,8 @@ export const AnnouncementsView: React.FC = () => {
     if (!window.confirm('Are you sure you want to delete this announcement?')) return;
     try {
       await deleteDoc(doc(db, 'announcements', id));
+      invalidateCache('announcements_view_list');
+      invalidateCache('dashboard_data_');
       setAnnouncements(prev => prev.filter(a => a.id !== id));
       if (selectedAnnouncement?.id === id) {
         setSelectedAnnouncement(null);
@@ -117,6 +127,8 @@ export const AnnouncementsView: React.FC = () => {
         };
 
         await setDoc(doc(db, 'announcements', id), newAnn);
+        invalidateCache('announcements_view_list');
+        invalidateCache('dashboard_data_');
         setAnnouncements(prev => [newAnn, ...prev]);
       } else {
         // Update existing
@@ -129,6 +141,8 @@ export const AnnouncementsView: React.FC = () => {
         };
 
         await updateDoc(doc(db, 'announcements', activeEditingAnn.id), updatedData);
+        invalidateCache('announcements_view_list');
+        invalidateCache('dashboard_data_');
         setAnnouncements(prev => prev.map(a => a.id === activeEditingAnn.id ? { ...a, ...updatedData } : a));
       }
 

@@ -27,9 +27,13 @@ import {
   Trash2,
   ShieldCheck,
   Sparkles,
-  AlertTriangle
+  AlertTriangle,
+  BellRing,
+  CalendarPlus,
+  Mail
 } from 'lucide-react';
 import { ActivitiesViewSkeleton } from '../ui/Skeleton';
+import { staleWhileRevalidate, invalidateCache } from '../../lib/cache';
 
 export const ActivitiesView: React.FC = () => {
   const { member, role } = useAuth();
@@ -48,6 +52,10 @@ export const ActivitiesView: React.FC = () => {
   const [deleteConfirmEvent, setDeleteConfirmEvent] = useState<ChurchEvent | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
+
+  // Member Pre-Registration / RSVP State
+  const [registrations, setRegistrations] = useState<Record<string, boolean>>({});
+  const [registeringEventId, setRegisteringEventId] = useState<string | null>(null);
 
   // Admin Create Activity Modal
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -69,15 +77,41 @@ export const ActivitiesView: React.FC = () => {
 
   const fetchEventsAndAttendance = async () => {
     try {
-      const evSnap = await getDocs(query(collection(db, 'events')));
-      const evList = evSnap.docs.map(d => ({ id: d.id, ...d.data() } as ChurchEvent));
-      evList.sort((a, b) => a.date.localeCompare(b.date));
-      setEvents(evList);
+      const cacheKey = `activities_view_${member?.id || 'guest'}`;
+      await staleWhileRevalidate(cacheKey, async () => {
+        const evPromise = getDocs(query(collection(db, 'events')));
+        const attPromise = member?.id
+          ? getDocs(query(collection(db, 'attendance'), where('memberId', '==', member.id)))
+          : Promise.resolve({ docs: [] } as any);
+        const regPromise = member?.id
+          ? getDocs(query(collection(db, 'activity_registrations'), where('memberId', '==', member.id), where('status', '==', 'confirmed')))
+          : Promise.resolve({ docs: [] } as any);
 
-      if (member?.id) {
-        const attSnap = await getDocs(query(collection(db, 'attendance'), where('memberId', '==', member.id)));
-        setAttendance(attSnap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord)));
-      }
+        const [evSnap, attSnap, regSnap] = await Promise.all([
+          evPromise,
+          attPromise,
+          regPromise
+        ]);
+
+        const evList = evSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as ChurchEvent));
+        evList.sort((a: ChurchEvent, b: ChurchEvent) => a.date.localeCompare(b.date));
+
+        const attList = attSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as AttendanceRecord));
+        const regMap: Record<string, boolean> = {};
+        regSnap.docs.forEach((d: any) => {
+          const data = d.data();
+          if (data.eventId) regMap[data.eventId] = true;
+        });
+
+        return { events: evList, attendance: attList, registrations: regMap };
+      }, (data, fromCache) => {
+        setEvents(data.events);
+        setAttendance(data.attendance);
+        setRegistrations(data.registrations);
+        if (fromCache) {
+          setLoading(false);
+        }
+      });
     } catch (err) {
       console.error('Error fetching activities:', err);
     } finally {
@@ -88,6 +122,53 @@ export const ActivitiesView: React.FC = () => {
   useEffect(() => {
     fetchEventsAndAttendance();
   }, [member?.id]);
+
+  const handleToggleRegistration = async (event: ChurchEvent, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!member) return;
+    const isRegistered = !!registrations[event.id];
+    setRegisteringEventId(event.id);
+
+    try {
+      if (isRegistered) {
+        await fetch('/api/activities/unregister', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId: event.id, memberId: member.id })
+        });
+        setRegistrations(prev => {
+          const copy = { ...prev };
+          delete copy[event.id];
+          return copy;
+        });
+        setFeedbackMessage(`Registration cancelled for "${event.title}".`);
+      } else {
+        await fetch('/api/activities/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            eventId: event.id,
+            memberId: member.id,
+            userId: member.userId || member.id,
+            memberName: member.fullName,
+            memberEmail: member.email,
+            memberPhone: member.phone
+          })
+        });
+        setRegistrations(prev => ({ ...prev, [event.id]: true }));
+        setFeedbackMessage(`Registered for "${event.title}"! Automated email & push reminder scheduled.`);
+
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+          Notification.requestPermission();
+        }
+      }
+      setTimeout(() => setFeedbackMessage(''), 5000);
+    } catch (err) {
+      console.error('Registration toggle error:', err);
+    } finally {
+      setRegisteringEventId(null);
+    }
+  };
 
   const handleOpenDetail = (ev: ChurchEvent) => {
     setSelectedEvent(ev);
@@ -169,6 +250,8 @@ export const ActivitiesView: React.FC = () => {
       };
 
       await setDoc(doc(db, 'events', id), newEvent);
+      invalidateCache('activities_view_');
+      invalidateCache('dashboard_data_');
       await fetchEventsAndAttendance();
       setIsCreateModalOpen(false);
     } catch (err) {
@@ -188,6 +271,8 @@ export const ActivitiesView: React.FC = () => {
     setDeleting(true);
     try {
       await deleteDoc(doc(db, 'events', deleteConfirmEvent.id));
+      invalidateCache('activities_view_');
+      invalidateCache('dashboard_data_');
       setEvents(prev => prev.filter(ev => ev.id !== deleteConfirmEvent.id));
       if (selectedEvent?.id === deleteConfirmEvent.id) setSelectedEvent(null);
       setFeedbackMessage(`Activity "${deleteConfirmEvent.title}" deleted successfully.`);
@@ -298,7 +383,7 @@ export const ActivitiesView: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="shrink-0 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                <div className="shrink-0 flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
                   {isAdminRole && (
                     <Button
                       type="button"
@@ -311,6 +396,36 @@ export const ActivitiesView: React.FC = () => {
                       Delete
                     </Button>
                   )}
+
+                  {/* Pre-Registration / RSVP status & toggle */}
+                  {registrations[event.id] ? (
+                    <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-2.5 py-1.5 rounded-xl text-xs font-semibold">
+                      <BellRing className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>RSVP Confirmed</span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleRegistration(event, e)}
+                        disabled={registeringEventId === event.id}
+                        className="text-[10px] text-slate-400 hover:text-rose-600 hover:underline ml-1"
+                        title="Cancel registration"
+                      >
+                        (Cancel)
+                      </button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      icon={<CalendarPlus className="w-3.5 h-3.5 text-teal-600" />}
+                      onClick={(e) => handleToggleRegistration(event, e)}
+                      loading={registeringEventId === event.id}
+                      className="text-xs text-slate-700 hover:text-teal-700 border-slate-200 hover:border-teal-300"
+                    >
+                      RSVP / Pre-Register
+                    </Button>
+                  )}
+
                   {attendanceRec ? (
                     <div className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-1.5">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -323,6 +438,7 @@ export const ActivitiesView: React.FC = () => {
                       size="sm"
                       icon={<QrCode className="w-4 h-4" />}
                       onClick={() => handleStartCheckIn(event)}
+                      className="text-xs"
                     >
                       Check In
                     </Button>
@@ -399,6 +515,32 @@ export const ActivitiesView: React.FC = () => {
               <p className="text-sm text-slate-600 leading-relaxed">
                 {selectedEvent.description}
               </p>
+            </div>
+
+            {/* Registration / RSVP reminder box */}
+            <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl flex items-center justify-between gap-3 text-xs">
+              <div className="space-y-0.5">
+                <span className="font-bold text-emerald-900 flex items-center gap-1.5">
+                  <BellRing className="w-4 h-4 text-emerald-600" />
+                  {registrations[selectedEvent.id] ? 'RSVP Active for this Service' : 'Activity Automated Reminders'}
+                </span>
+                <p className="text-slate-500 text-[11px]">
+                  {registrations[selectedEvent.id] 
+                    ? 'Automated background service will trigger email & push notifications before service starts.'
+                    : 'Pre-register to trigger automated email & push alerts before this gathering.'}
+                </p>
+              </div>
+
+              <Button
+                type="button"
+                variant={registrations[selectedEvent.id] ? 'outline' : 'primary'}
+                size="sm"
+                onClick={() => handleToggleRegistration(selectedEvent)}
+                loading={registeringEventId === selectedEvent.id}
+                className="shrink-0 text-xs"
+              >
+                {registrations[selectedEvent.id] ? 'Cancel RSVP' : 'RSVP Now'}
+              </Button>
             </div>
 
             <div className="pt-2 border-t border-slate-100 flex gap-2">

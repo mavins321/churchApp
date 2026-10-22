@@ -140,6 +140,40 @@ export interface ChurchNotification {
   read: boolean;
   link?: string;
   createdAt: string;
+  eventId?: string;
+  emailSent?: boolean;
+  pushSent?: boolean;
+}
+
+export interface ActivityRegistration {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  eventDate: string;
+  eventStartTime: string;
+  eventLocation: string;
+  memberId: string;
+  userId: string;
+  memberName: string;
+  memberEmail: string;
+  memberPhone?: string;
+  membershipNumber?: string;
+  status: 'confirmed' | 'cancelled';
+  reminderSent: boolean;
+  registeredAt: string;
+}
+
+export interface EmailDispatchRecord {
+  id: string;
+  recipientEmail: string;
+  recipientName: string;
+  eventId: string;
+  eventTitle: string;
+  eventDate: string;
+  subject: string;
+  snippet: string;
+  status: 'delivered' | 'simulated' | 'queued';
+  dispatchedAt: string;
 }
 
 export interface ChurchSettings {
@@ -169,3 +203,44 @@ export interface AuditLog {
   targetId: string;
   timestamp: string;
 }
+
+export type PrayerCategory = 
+  | 'Healing & Health' 
+  | 'Spiritual Growth' 
+  | 'Family & Marriage' 
+  | 'Financial Breakthrough' 
+  | 'Career & Academics' 
+  | 'Fruit of the Womb' 
+  | 'Protection & Deliverance' 
+  | 'Thanksgiving & Praise'
+  | 'Other Needs';
+
+export interface PrayerEncouragement {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorRole?: UserRole;
+  message: string;
+  createdAt: string;
+}
+
+export interface PrayerRequest {
+  id: string;
+  title: string;
+  description: string;
+  category: PrayerCategory;
+  authorId: string;
+  authorName: string;
+  authorMemberNumber?: string;
+  isAnonymous: boolean;
+  isConfidentialToPastors: boolean;
+  status: 'active' | 'answered' | 'archived';
+  testimony?: string;
+  answeredAt?: string;
+  prayCount: number;
+  prayedUserIds: string[];
+  encouragements?: PrayerEncouragement[];
+  createdAt: string;
+  updatedAt: string;
+}
+

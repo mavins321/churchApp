@@ -22,6 +22,9 @@ export default defineConfig(() => {
     },
     build: {
       chunkSizeWarningLimit: 1200,
+      target: 'es2022',
+      cssCodeSplit: true,
+      minify: 'esbuild',
       rollupOptions: {
         output: {
           manualChunks(id) {
@@ -33,6 +36,9 @@ export default defineConfig(() => {
             }
             if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
               return 'vendor-react';
+            }
+            if (id.includes('node_modules/qrcode') || id.includes('node_modules/canvas-confetti')) {
+              return 'vendor-utils';
             }
           }
         }

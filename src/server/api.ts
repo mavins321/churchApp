@@ -365,3 +365,104 @@ GUIDELINES:
     });
   }
 });
+
+// -------------------------------------------------------------
+// 3. BACKGROUND NOTIFICATION & UPCOMING ACTIVITIES CHECK
+// -------------------------------------------------------------
+import { 
+  runNotificationCheck, 
+  getNotifierStatus 
+} from './backgroundNotifier';
+
+// Manual trigger for background notification check
+apiRouter.post('/notifications/run-check', async (_req: Request, res: Response) => {
+  try {
+    const result = await runNotificationCheck();
+    return res.json({ success: true, result });
+  } catch (err: any) {
+    console.error('Trigger check error:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Failed to execute check.' });
+  }
+});
+
+// Telemetry and status of background check
+apiRouter.get('/notifications/status', (_req: Request, res: Response) => {
+  try {
+    const status = getNotifierStatus();
+    return res.json(status);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Failed to get status.' });
+  }
+});
+
+// Member pre-registration / RSVP for an activity
+apiRouter.post('/activities/register', async (req: Request, res: Response) => {
+  try {
+    const { eventId, memberId, userId, memberName, memberEmail, memberPhone } = req.body;
+    if (!eventId || !memberId) {
+      return res.status(400).json({ error: 'Missing eventId or memberId.' });
+    }
+
+    const evDoc = await getDoc(doc(db, 'events', eventId));
+    if (!evDoc.exists()) {
+      return res.status(404).json({ error: 'Activity not found.' });
+    }
+    const event = evDoc.data();
+
+    const regId = `reg_${eventId}_${memberId}`;
+    const registration = {
+      id: regId,
+      eventId,
+      eventTitle: event.title,
+      eventDate: event.date,
+      eventStartTime: event.startTime,
+      eventLocation: event.location,
+      memberId,
+      userId: userId || memberId,
+      memberName: memberName || 'Church Member',
+      memberEmail: memberEmail || '',
+      memberPhone: memberPhone || '',
+      status: 'confirmed',
+      reminderSent: false,
+      registeredAt: new Date().toISOString()
+    };
+
+    await setDoc(doc(db, 'activity_registrations', regId), registration);
+    return res.json({ success: true, registration });
+  } catch (err: any) {
+    console.error('Register activity error:', err);
+    return res.status(500).json({ error: err.message || 'Could not register for activity.' });
+  }
+});
+
+// Cancel registration / RSVP
+apiRouter.post('/activities/unregister', async (req: Request, res: Response) => {
+  try {
+    const { eventId, memberId } = req.body;
+    if (!eventId || !memberId) {
+      return res.status(400).json({ error: 'Missing eventId or memberId.' });
+    }
+    const regId = `reg_${eventId}_${memberId}`;
+    await updateDoc(doc(db, 'activity_registrations', regId), {
+      status: 'cancelled',
+      cancelledAt: new Date().toISOString()
+    });
+    return res.json({ success: true, message: 'Registration cancelled.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Could not cancel registration.' });
+  }
+});
+
+// Get member's active registrations
+apiRouter.get('/activities/registrations/:memberId', async (req: Request, res: Response) => {
+  try {
+    const { memberId } = req.params;
+    const snap = await getDocs(
+      query(collection(db, 'activity_registrations'), where('memberId', '==', memberId), where('status', '==', 'confirmed'))
+    );
+    const list = snap.docs.map(d => d.data());
+    return res.json({ registrations: list });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Could not fetch registrations.' });
+  }
+});

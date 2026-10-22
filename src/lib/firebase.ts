@@ -1,7 +1,17 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import fallbackConfig from '../../firebase-applet-config.json';
+
+// Default project parameters (no external JSON file required)
+const DEFAULT_CONFIG = {
+  projectId: "gen-lang-client-0977597727",
+  appId: "1:1078381596207:web:75b7fb1dc79e164fef40da",
+  apiKey: "AIzaSyCrW5rodnEBisqMZpbG7V0pZ6Wl8rJ_OrU",
+  authDomain: "gen-lang-client-0977597727.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-6c36ddf5-59c3-4c66-8e1c-c86b06845eb4",
+  storageBucket: "gen-lang-client-0977597727.firebasestorage.app",
+  messagingSenderId: "1078381596207"
+};
 
 // Safely extract environment variables in both Node.js (server.ts) and Vite client
 const getEnv = (key: string): string | undefined => {
@@ -20,15 +30,15 @@ const getEnv = (key: string): string | undefined => {
   return undefined;
 };
 
-// Support both environment variables (recommended for GitHub repos) and local config
+// Support environment variables with default project fallback
 const firebaseConfig = {
-  apiKey: getEnv('VITE_FIREBASE_API_KEY') || fallbackConfig.apiKey,
-  authDomain: getEnv('VITE_FIREBASE_AUTH_DOMAIN') || fallbackConfig.authDomain,
-  projectId: getEnv('VITE_FIREBASE_PROJECT_ID') || fallbackConfig.projectId,
-  storageBucket: getEnv('VITE_FIREBASE_STORAGE_BUCKET') || fallbackConfig.storageBucket,
-  messagingSenderId: getEnv('VITE_FIREBASE_MESSAGING_SENDER_ID') || fallbackConfig.messagingSenderId,
-  appId: getEnv('VITE_FIREBASE_APP_ID') || fallbackConfig.appId,
-  firestoreDatabaseId: getEnv('VITE_FIREBASE_DATABASE_ID') || fallbackConfig.firestoreDatabaseId,
+  apiKey: getEnv('VITE_FIREBASE_API_KEY') || DEFAULT_CONFIG.apiKey,
+  authDomain: getEnv('VITE_FIREBASE_AUTH_DOMAIN') || DEFAULT_CONFIG.authDomain,
+  projectId: getEnv('VITE_FIREBASE_PROJECT_ID') || DEFAULT_CONFIG.projectId,
+  storageBucket: getEnv('VITE_FIREBASE_STORAGE_BUCKET') || DEFAULT_CONFIG.storageBucket,
+  messagingSenderId: getEnv('VITE_FIREBASE_MESSAGING_SENDER_ID') || DEFAULT_CONFIG.messagingSenderId,
+  appId: getEnv('VITE_FIREBASE_APP_ID') || DEFAULT_CONFIG.appId,
+  firestoreDatabaseId: getEnv('VITE_FIREBASE_DATABASE_ID') || DEFAULT_CONFIG.firestoreDatabaseId,
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();

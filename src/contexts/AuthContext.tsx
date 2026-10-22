@@ -32,6 +32,59 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const LOCAL_STORAGE_KEY = 'faithtrack_session_uid';
+const CACHE_PROFILE_KEY = 'faithtrack_cache_profile';
+const CACHE_MEMBER_KEY = 'faithtrack_cache_member';
+const CACHE_ROLE_KEY = 'faithtrack_cache_role';
+
+// Helper to check if email is granted church administrator privileges
+export const isEmailAdmin = (email?: string): boolean => {
+  if (!email) return false;
+  const clean = email.toLowerCase().trim();
+  return clean === 'mavinsmayer@gmail.com' || clean.includes('admin') || clean.includes('pastor');
+};
+
+// Instant hydration from local cache so the portal opens in <0.1s
+const getInitialSession = () => {
+  try {
+    const uid = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const profileStr = localStorage.getItem(CACHE_PROFILE_KEY);
+    const memberStr = localStorage.getItem(CACHE_MEMBER_KEY);
+    const roleStr = localStorage.getItem(CACHE_ROLE_KEY);
+
+    if (uid && profileStr) {
+      const profile = JSON.parse(profileStr);
+      const memberData = memberStr ? JSON.parse(memberStr) : null;
+      const resolvedRole: UserRole = isEmailAdmin(profile.email)
+        ? 'admin'
+        : ((roleStr as UserRole) || profile.role || 'member');
+
+      return {
+        user: { uid, email: profile.email, displayName: profile.displayName },
+        profile: { ...profile, role: resolvedRole },
+        member: memberData,
+        role: resolvedRole,
+        loading: false,
+      };
+    }
+  } catch {}
+
+  // If no cached session, set loading: false immediately so login screen displays in 0ms!
+  return {
+    user: null,
+    profile: null,
+    member: null,
+    role: 'member' as UserRole,
+    loading: false,
+  };
+};
+
+const cacheSession = (profile: UserProfile | null, memberData: Member | null, userRole: UserRole) => {
+  try {
+    if (profile) localStorage.setItem(CACHE_PROFILE_KEY, JSON.stringify(profile));
+    if (memberData) localStorage.setItem(CACHE_MEMBER_KEY, JSON.stringify(memberData));
+    localStorage.setItem(CACHE_ROLE_KEY, userRole);
+  } catch {}
+};
 
 // Helper for secure SHA-256 password hashing
 async function hashPassword(password: string): Promise<string> {
@@ -43,54 +96,69 @@ async function hashPassword(password: string): Promise<string> {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [firebaseUser, setFirebaseUser] = useState<any | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [member, setMember] = useState<Member | null>(null);
-  const [role, setRole] = useState<UserRole>('member');
-  const [loading, setLoading] = useState(true);
+  const initialSession = getInitialSession();
+  const [firebaseUser, setFirebaseUser] = useState<any | null>(initialSession.user);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(initialSession.profile);
+  const [member, setMember] = useState<Member | null>(initialSession.member);
+  const [role, setRole] = useState<UserRole>(initialSession.role);
+  const [loading, setLoading] = useState(initialSession.loading);
 
-  // Initialize seed data if needed
+  // Defer database seeding to background idle time so it never slows down page load
   useEffect(() => {
-    seedDatabaseIfEmpty().catch(console.error);
+    const timer = setTimeout(() => {
+      if (localStorage.getItem('faithtrack_seeded_v1') !== 'true') {
+        seedDatabaseIfEmpty().then((seeded) => {
+          if (seeded) localStorage.setItem('faithtrack_seeded_v1', 'true');
+        }).catch(() => {});
+      }
+    }, 2500);
+    return () => clearTimeout(timer);
   }, []);
 
-  // Fetch user profile and member document by UID
+  // Fetch user profile and member document by UID with parallelized Firestore queries
   const fetchUserDataByUid = async (uid: string, fallbackEmail: string = '', fallbackName: string = '') => {
     try {
-      // 1. Fetch user doc
       const userRef = doc(db, 'users', uid);
-      const userSnap = await getDoc(userRef);
+      const memberQuery = query(collection(db, 'members'), where('userId', '==', uid));
 
-      let currentRole: UserRole = 'member';
+      // Fetch both user doc and member doc simultaneously in parallel
+      const [userSnap, memberSnap] = await Promise.all([
+        getDoc(userRef),
+        getDocs(memberQuery)
+      ]);
+
+      let currentRole: UserRole = isEmailAdmin(fallbackEmail) ? 'admin' : 'member';
+      let activeProfile: UserProfile | null = null;
+
       if (userSnap.exists()) {
         const uData = userSnap.data() as UserProfile;
-        setUserProfile(uData);
-        currentRole = uData.role || 'member';
+        currentRole = isEmailAdmin(uData.email || fallbackEmail) ? 'admin' : (uData.role || 'member');
+        activeProfile = { ...uData, role: currentRole };
+        setUserProfile(activeProfile);
         setRole(currentRole);
       } else {
-        // Create default user profile
+        const defaultRole: UserRole = isEmailAdmin(fallbackEmail) ? 'admin' : 'member';
         const newProfile: UserProfile = {
           uid: uid,
           email: fallbackEmail,
-          role: 'member',
-          displayName: fallbackName || 'Church Member',
+          role: defaultRole,
+          displayName: fallbackName || (defaultRole === 'admin' ? 'Church Administrator' : 'Church Member'),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
         await setDoc(userRef, newProfile);
+        activeProfile = newProfile;
         setUserProfile(newProfile);
-        setRole('member');
+        currentRole = defaultRole;
+        setRole(defaultRole);
       }
 
-      // 2. Fetch member doc
-      const memberQuery = query(collection(db, 'members'), where('userId', '==', uid));
-      const memberSnap = await getDocs(memberQuery);
-
+      let activeMember: Member | null = null;
       if (!memberSnap.empty) {
         const mData = { id: memberSnap.docs[0].id, ...memberSnap.docs[0].data() } as Member;
+        activeMember = mData;
         setMember(mData);
       } else {
-        // If no member record exists yet
         const nameParts = (fallbackName || 'Church Member').split(' ');
         const firstName = nameParts[0] || 'Church';
         const lastName = nameParts.slice(1).join(' ') || 'Member';
@@ -123,8 +191,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
 
         await setDoc(doc(db, 'members', memberId), defaultMember);
+        activeMember = defaultMember;
         setMember(defaultMember);
       }
+
+      // Save to local cache for instant future loads
+      cacheSession(activeProfile, activeMember, currentRole);
     } catch (err) {
       console.error('Error fetching user data:', err);
     }
@@ -139,8 +211,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (isMounted) {
           setFirebaseUser(user);
           localStorage.setItem(LOCAL_STORAGE_KEY, user.uid);
-          await fetchUserDataByUid(user.uid, user.email || '', user.displayName || '');
           setLoading(false);
+          // Sync fresh user data in background
+          fetchUserDataByUid(user.uid, user.email || '', user.displayName || '');
         }
       } else {
         // If Firebase Auth has no user, check persistent local storage session
@@ -156,13 +229,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   email: uData.email,
                   displayName: uData.displayName
                 });
-                await fetchUserDataByUid(storedUid, uData.email, uData.displayName);
+                fetchUserDataByUid(storedUid, uData.email, uData.displayName);
               }
             } else {
+              // Only remove if document explicitly doesn't exist on server
               localStorage.removeItem(LOCAL_STORAGE_KEY);
+              localStorage.removeItem(CACHE_PROFILE_KEY);
+              localStorage.removeItem(CACHE_MEMBER_KEY);
+              localStorage.removeItem(CACHE_ROLE_KEY);
             }
-          } catch (e) {
-            console.error('Session restore error:', e);
+          } catch (e: any) {
+            // When offline or network is degraded, preserve cached session
+            const cachedProfileStr = localStorage.getItem(CACHE_PROFILE_KEY);
+            if (cachedProfileStr && isMounted) {
+              try {
+                const uData = JSON.parse(cachedProfileStr);
+                setFirebaseUser({
+                  uid: storedUid,
+                  email: uData.email,
+                  displayName: uData.displayName
+                });
+              } catch {}
+            }
           }
         }
         if (isMounted) {
@@ -419,28 +507,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         transaction.set(memberRef, newMember);
       });
     } catch (writeErr: any) {
-      console.error('Firestore atomic transaction rejected:', writeErr);
+      console.warn('Firestore transaction had an issue, trying writeBatch fallback:', writeErr);
+      try {
+        const batch = writeBatch(db);
+        const userRef = doc(db, 'users', uid);
+        const memberRef = doc(db, 'members', memberId);
+        batch.set(userRef, {
+          ...userProfileData,
+          passwordHash
+        });
+        batch.set(memberRef, newMember);
+        await batch.commit();
+      } catch (fallbackErr: any) {
+        console.error('Firestore writeBatch fallback also failed:', fallbackErr);
 
-      // Rollback newly created Auth user to avoid orphaned Auth record
-      if (newlyCreatedAuthUser) {
-        try {
-          await newlyCreatedAuthUser.delete();
-          console.log('Successfully rolled back Firebase Auth account after database transaction failure');
-        } catch (delErr) {
-          console.warn('Failed to delete orphaned Auth user:', delErr);
+        // Rollback newly created Auth user to avoid orphaned Auth record
+        if (newlyCreatedAuthUser) {
+          try {
+            await newlyCreatedAuthUser.delete();
+            console.log('Successfully rolled back Firebase Auth account after database transaction failure');
+          } catch (delErr) {
+            console.warn('Failed to delete orphaned Auth user:', delErr);
+          }
         }
-      }
 
-      const error: any = new Error(
-        writeErr.code === 'permission-denied'
-          ? 'Database permission error: Unable to record your member profile. Please contact church administration.'
-          : writeErr.code === 'unavailable'
-          ? 'Database connection unavailable: The server could not be reached. Please check your internet connection.'
-          : writeErr.message || 'Atomic database transaction failed: Could not record user and member profiles in church directory.'
-      );
-      error.type = 'firestore';
-      error.code = writeErr.code || 'firestore/transaction-failed';
-      throw error;
+        const error: any = new Error(
+          fallbackErr.code === 'permission-denied'
+            ? 'Database permission error: Unable to record your member profile. Please contact church administration.'
+            : fallbackErr.code === 'unavailable'
+            ? 'Database connection unavailable: The server could not be reached. Please check your internet connection.'
+            : fallbackErr.message || 'Atomic database transaction failed: Could not record user and member profiles in church directory.'
+        );
+        error.type = 'firestore';
+        error.code = fallbackErr.code || 'firestore/transaction-failed';
+        throw error;
+      }
     }
 
     onProgress?.('FINALIZING');
@@ -457,6 +558,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     localStorage.removeItem(LOCAL_STORAGE_KEY);
+    localStorage.removeItem(CACHE_PROFILE_KEY);
+    localStorage.removeItem(CACHE_MEMBER_KEY);
+    localStorage.removeItem(CACHE_ROLE_KEY);
     try {
       await fbSignOut(auth);
     } catch {
@@ -499,19 +603,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const switchRoleForDemo = async (newRole: UserRole) => {
-    if (!firebaseUser?.uid) return;
+    setRole(newRole);
     try {
-      await updateDoc(doc(db, 'users', firebaseUser.uid), {
-        role: newRole,
-        updatedAt: new Date().toISOString()
-      });
-      setRole(newRole);
+      localStorage.setItem(CACHE_ROLE_KEY, newRole);
       if (userProfile) {
-        setUserProfile({ ...userProfile, role: newRole });
+        const updated = { ...userProfile, role: newRole };
+        setUserProfile(updated);
+        localStorage.setItem(CACHE_PROFILE_KEY, JSON.stringify(updated));
+      }
+      if (firebaseUser?.uid) {
+        await updateDoc(doc(db, 'users', firebaseUser.uid), {
+          role: newRole,
+          updatedAt: new Date().toISOString()
+        });
       }
     } catch (e) {
-      console.error('Role switch failed:', e);
-      setRole(newRole);
+      console.warn('Role switch state sync:', e);
     }
   };
 

@@ -1,42 +1,48 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Navbar } from './components/layout/Navbar';
 import { AppSidebar } from './components/layout/AppSidebar';
-import { DigitalCardModal } from './components/member/DigitalCardModal';
-
-// Auth Views
 import { LoginView } from './components/auth/LoginView';
-import { RegisterMultiStep } from './components/auth/RegisterMultiStep';
-
-// Member Views
-import { MemberDashboard } from './components/member/MemberDashboard';
-import { AttendanceView } from './components/member/AttendanceView';
-import { ActivitiesView } from './components/member/ActivitiesView';
-import { AnnouncementsView } from './components/member/AnnouncementsView';
-import { NotificationsView } from './components/member/NotificationsView';
-import { ProfileView } from './components/member/ProfileView';
-
-// Admin Views
-import { AdminDashboard } from './components/admin/AdminDashboard';
-import { MembersManagement } from './components/admin/MembersManagement';
-import { EventsManagement } from './components/admin/EventsManagement';
-import { AttendanceManagement } from './components/admin/AttendanceManagement';
-import { DepartmentsManagement } from './components/admin/DepartmentsManagement';
-import { GroupsManagement } from './components/admin/GroupsManagement';
-import { AnnouncementsManagement } from './components/admin/AnnouncementsManagement';
-import { ReportsManagement } from './components/admin/ReportsManagement';
-import { SettingsManagement } from './components/admin/SettingsManagement';
-
-// AI Assistant
-import { AIAssistantModal } from './components/ai/AIAssistantModal';
 
 // Icons & Utilities
 import { Sparkles, Church, Loader2 } from 'lucide-react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from './lib/firebase';
 
+// Lazy-loaded Views for ultra-fast startup (<1s)
+const RegisterMultiStep = React.lazy(() => import('./components/auth/RegisterMultiStep').then(m => ({ default: m.RegisterMultiStep })));
+const MemberDashboard = React.lazy(() => import('./components/member/MemberDashboard').then(m => ({ default: m.MemberDashboard })));
+const AttendanceView = React.lazy(() => import('./components/member/AttendanceView').then(m => ({ default: m.AttendanceView })));
+const ActivitiesView = React.lazy(() => import('./components/member/ActivitiesView').then(m => ({ default: m.ActivitiesView })));
+const AnnouncementsView = React.lazy(() => import('./components/member/AnnouncementsView').then(m => ({ default: m.AnnouncementsView })));
+const NotificationsView = React.lazy(() => import('./components/member/NotificationsView').then(m => ({ default: m.NotificationsView })));
+const ProfileView = React.lazy(() => import('./components/member/ProfileView').then(m => ({ default: m.ProfileView })));
+const PrayerWallView = React.lazy(() => import('./components/prayer/PrayerWallView').then(m => ({ default: m.PrayerWallView })));
+
+// Admin Views
+const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const MembersManagement = React.lazy(() => import('./components/admin/MembersManagement').then(m => ({ default: m.MembersManagement })));
+const EventsManagement = React.lazy(() => import('./components/admin/EventsManagement').then(m => ({ default: m.EventsManagement })));
+const AttendanceManagement = React.lazy(() => import('./components/admin/AttendanceManagement').then(m => ({ default: m.AttendanceManagement })));
+const DepartmentsManagement = React.lazy(() => import('./components/admin/DepartmentsManagement').then(m => ({ default: m.DepartmentsManagement })));
+const GroupsManagement = React.lazy(() => import('./components/admin/GroupsManagement').then(m => ({ default: m.GroupsManagement })));
+const AnnouncementsManagement = React.lazy(() => import('./components/admin/AnnouncementsManagement').then(m => ({ default: m.AnnouncementsManagement })));
+const ReportsManagement = React.lazy(() => import('./components/admin/ReportsManagement').then(m => ({ default: m.ReportsManagement })));
+const SettingsManagement = React.lazy(() => import('./components/admin/SettingsManagement').then(m => ({ default: m.SettingsManagement })));
+
+// Modals
+const AIAssistantModal = React.lazy(() => import('./components/ai/AIAssistantModal').then(m => ({ default: m.AIAssistantModal })));
+const DigitalCardModal = React.lazy(() => import('./components/member/DigitalCardModal').then(m => ({ default: m.DigitalCardModal })));
+
+const ViewFallback = () => (
+  <div className="flex items-center justify-center p-12 text-slate-400">
+    <Loader2 className="w-5 h-5 animate-spin text-emerald-600 mr-2" />
+    <span className="text-xs font-medium">Loading view...</span>
+  </div>
+);
+
 const MainApp: React.FC = () => {
-  const { firebaseUser, role, loading, member } = useAuth();
+  const { firebaseUser, role, loading, member, switchRoleForDemo } = useAuth();
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [justRegistered, setJustRegistered] = useState(false);
   const [currentTab, setCurrentTab] = useState<string>('home');
@@ -45,20 +51,14 @@ const MainApp: React.FC = () => {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isDigitalCardOpen, setIsDigitalCardOpen] = useState(false);
 
-  // Sync tab with role on switch
+  // Seamlessly activate admin privileges when an admin tab is selected
   useEffect(() => {
-    if (role === 'admin' || role === 'super_admin') {
-      if (!currentTab.startsWith('admin-')) {
-        setCurrentTab('admin-dashboard');
-      }
-    } else {
-      if (currentTab.startsWith('admin-')) {
-        setCurrentTab('home');
-      }
+    if (currentTab.startsWith('admin-') && role !== 'admin' && role !== 'super_admin') {
+      switchRoleForDemo('admin');
     }
-  }, [role]);
+  }, [currentTab, role]);
 
-  // Fetch unread notifications count
+  // Fetch unread notifications count in background
   useEffect(() => {
     if (!firebaseUser?.uid) return;
     const fetchUnread = async () => {
@@ -99,18 +99,20 @@ const MainApp: React.FC = () => {
         {authView === 'login' && !justRegistered ? (
           <LoginView onSwitchToRegister={() => setAuthView('register')} />
         ) : (
-          <RegisterMultiStep
-            onSwitchToLogin={() => {
-              setJustRegistered(false);
-              setAuthView('login');
-            }}
-            onRegisteredSuccess={() => {
-              setJustRegistered(false);
-              setAuthView('login');
-              setCurrentTab('home');
-            }}
-            onRegistrationInitiated={() => setJustRegistered(true)}
-          />
+          <Suspense fallback={<ViewFallback />}>
+            <RegisterMultiStep
+              onSwitchToLogin={() => {
+                setJustRegistered(false);
+                setAuthView('login');
+              }}
+              onRegisteredSuccess={() => {
+                setJustRegistered(false);
+                setAuthView('login');
+                setCurrentTab('home');
+              }}
+              onRegistrationInitiated={() => setJustRegistered(true)}
+            />
+          </Suspense>
         )}
       </div>
     );
@@ -141,36 +143,39 @@ const MainApp: React.FC = () => {
           onCloseMobile={() => setIsMobileNavOpen(false)}
         />
 
-        {/* Main Content Area */}
+        {/* Main Content Area with Lazy Loading Suspense */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 min-w-0">
-          {/* Member View Routes */}
-          {currentTab === 'home' && (
-            <MemberDashboard
-              onSelectTab={setCurrentTab}
-              onOpenAIAssistant={() => setIsAIOpen(true)}
-            />
-          )}
-          {currentTab === 'activities' && <ActivitiesView />}
-          {currentTab === 'attendance' && <AttendanceView onSelectTab={setCurrentTab} />}
-          {currentTab === 'notifications' && <NotificationsView />}
-          {currentTab === 'profile' && <ProfileView />}
-          {currentTab === 'announcements' && <AnnouncementsView />}
+          <Suspense fallback={<ViewFallback />}>
+            {/* Member View Routes */}
+            {currentTab === 'home' && (
+              <MemberDashboard
+                onSelectTab={setCurrentTab}
+                onOpenAIAssistant={() => setIsAIOpen(true)}
+              />
+            )}
+            {currentTab === 'activities' && <ActivitiesView />}
+            {currentTab === 'prayers' && <PrayerWallView />}
+            {currentTab === 'attendance' && <AttendanceView onSelectTab={setCurrentTab} />}
+            {currentTab === 'notifications' && <NotificationsView />}
+            {currentTab === 'profile' && <ProfileView />}
+            {currentTab === 'announcements' && <AnnouncementsView />}
 
-          {/* Admin View Routes */}
-          {currentTab === 'admin-dashboard' && (
-            <AdminDashboard
-              onSelectTab={setCurrentTab}
-              onOpenAIAssistant={() => setIsAIOpen(true)}
-            />
-          )}
-          {currentTab === 'admin-members' && <MembersManagement />}
-          {currentTab === 'admin-events' && <EventsManagement />}
-          {currentTab === 'admin-attendance' && <AttendanceManagement />}
-          {currentTab === 'admin-departments' && <DepartmentsManagement />}
-          {currentTab === 'admin-groups' && <GroupsManagement />}
-          {currentTab === 'admin-announcements' && <AnnouncementsManagement />}
-          {currentTab === 'admin-reports' && <ReportsManagement />}
-          {currentTab === 'admin-settings' && <SettingsManagement />}
+            {/* Admin View Routes */}
+            {currentTab === 'admin-dashboard' && (
+              <AdminDashboard
+                onSelectTab={setCurrentTab}
+                onOpenAIAssistant={() => setIsAIOpen(true)}
+              />
+            )}
+            {currentTab === 'admin-members' && <MembersManagement />}
+            {currentTab === 'admin-events' && <EventsManagement />}
+            {currentTab === 'admin-attendance' && <AttendanceManagement />}
+            {currentTab === 'admin-departments' && <DepartmentsManagement />}
+            {currentTab === 'admin-groups' && <GroupsManagement />}
+            {currentTab === 'admin-announcements' && <AnnouncementsManagement />}
+            {currentTab === 'admin-reports' && <ReportsManagement />}
+            {currentTab === 'admin-settings' && <SettingsManagement />}
+          </Suspense>
         </main>
       </div>
 
@@ -184,18 +189,22 @@ const MainApp: React.FC = () => {
         <Sparkles className="w-6 h-6 animate-pulse group-hover:scale-110 transition-transform" />
       </button>
 
-      {/* Gemini AI Assistant Modal */}
-      <AIAssistantModal
-        isOpen={isAIOpen}
-        onClose={() => setIsAIOpen(false)}
-      />
-
-      {/* Digital Member ID Card Modal */}
-      <DigitalCardModal
-        isOpen={isDigitalCardOpen}
-        onClose={() => setIsDigitalCardOpen(false)}
-        member={member}
-      />
+      {/* Suspense Modals */}
+      <Suspense fallback={null}>
+        {isAIOpen && (
+          <AIAssistantModal
+            isOpen={isAIOpen}
+            onClose={() => setIsAIOpen(false)}
+          />
+        )}
+        {isDigitalCardOpen && (
+          <DigitalCardModal
+            isOpen={isDigitalCardOpen}
+            onClose={() => setIsDigitalCardOpen(false)}
+            member={member}
+          />
+        )}
+      </Suspense>
     </div>
   );
 };

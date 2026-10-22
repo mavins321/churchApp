@@ -1,6 +1,6 @@
 import { collection, getDocs, doc, setDoc, query, limit } from 'firebase/firestore';
 import { db } from './firebase';
-import { ChurchEvent, Department, ChurchGroup, Announcement, ChurchSettings } from '../types';
+import { ChurchEvent, Department, ChurchGroup, Announcement, ChurchSettings, PrayerRequest } from '../types';
 
 export const INITIAL_SETTINGS: ChurchSettings = {
   id: 'general',
@@ -221,9 +221,105 @@ export async function seedDatabaseIfEmpty(): Promise<boolean> {
       }
     }
 
+    // 6. Prayer Requests
+    const prayerSnap = await getDocs(query(collection(db, 'prayer_requests'), limit(1)));
+    if (prayerSnap.empty) {
+      for (const pr of INITIAL_PRAYER_REQUESTS) {
+        await setDoc(doc(db, 'prayer_requests', pr.id), {
+          ...pr,
+          createdAt: now,
+          updatedAt: now
+        });
+      }
+    }
+
     return true;
   } catch (err) {
     console.error('Error seeding database:', err);
     return false;
   }
 }
+
+export const INITIAL_PRAYER_REQUESTS: Omit<PrayerRequest, 'createdAt' | 'updatedAt'>[] = [
+  {
+    id: 'prayer-1',
+    title: 'Divine Healing & Quick Recovery for My Mother',
+    description: 'Please stand with our family in prayer for my mother Deaconess Esther, who was recently diagnosed with acute cardiovascular fatigue. Believing God for supernatural restoration according to Jeremiah 30:17.',
+    category: 'Healing & Health',
+    authorId: 'mem_demo_john',
+    authorName: 'Bro. Emmanuel David',
+    authorMemberNumber: 'FT-2026-00104',
+    isAnonymous: false,
+    isConfidentialToPastors: false,
+    status: 'active',
+    prayCount: 28,
+    prayedUserIds: ['user-1', 'user-2', 'user-3'],
+    encouragements: [
+      {
+        id: 'enc-1',
+        authorId: 'pastor-1',
+        authorName: 'Pastor Tolu',
+        authorRole: 'admin',
+        message: 'By His stripes she is healed! The prayer band is lifting her up during midnight watch tonight.',
+        createdAt: new Date(Date.now() - 3600000 * 5).toISOString()
+      },
+      {
+        id: 'enc-2',
+        authorId: 'mem-grace',
+        authorName: 'Sis. Grace Obi',
+        authorRole: 'member',
+        message: 'Standing in faith with you, brother. Psalm 103:3!',
+        createdAt: new Date(Date.now() - 3600000 * 2).toISOString()
+      }
+    ]
+  },
+  {
+    id: 'prayer-2',
+    title: 'Supernatural Favor in Bar Examination & Job Transition',
+    description: 'Writing my final qualifying exams and interviewing for a senior corporate counsel position next week. Praying for divine wisdom, recall, and favoring countenance before the panel.',
+    category: 'Career & Academics',
+    authorId: 'mem_demo_sarah',
+    authorName: 'Anonymous Sister',
+    isAnonymous: true,
+    isConfidentialToPastors: false,
+    status: 'active',
+    prayCount: 19,
+    prayedUserIds: ['user-4', 'user-5'],
+    encouragements: [
+      {
+        id: 'enc-3',
+        authorId: 'elder-samuel',
+        authorName: 'Elder Samuel Johnson',
+        authorRole: 'member',
+        message: 'The Lord grants you the tongue of the learned and sets you on high. You will excel!',
+        createdAt: new Date(Date.now() - 3600000 * 8).toISOString()
+      }
+    ]
+  },
+  {
+    id: 'prayer-3',
+    title: 'Praise Report: Miracle Job Offer After 11 Months of Waiting!',
+    description: 'Beloved brethren, I want to return all praise to Jehovah El-Shaddai! After 11 months of fervent prayer and attending Faith Clinic faithfully, I received a global contract offer exceeding expectations.',
+    category: 'Thanksgiving & Praise',
+    authorId: 'mem_demo_peter',
+    authorName: 'Bro. Peter Adeyemi',
+    authorMemberNumber: 'FT-2026-00219',
+    isAnonymous: false,
+    isConfidentialToPastors: false,
+    status: 'answered',
+    testimony: 'God proved that delay is not denial. When men said there was a casting down, God manifested a glorious lifting up! Thank you to the prayer team for holding my hands.',
+    answeredAt: new Date(Date.now() - 86400000).toISOString(),
+    prayCount: 47,
+    prayedUserIds: ['user-1', 'user-2', 'user-3', 'user-6'],
+    encouragements: [
+      {
+        id: 'enc-4',
+        authorId: 'pastor-mercy',
+        authorName: 'Pastor Mercy',
+        authorRole: 'admin',
+        message: 'Hallelujah! The testimony shall be permanent in Jesus name. Your joy is made full.',
+        createdAt: new Date(Date.now() - 3600000 * 12).toISOString()
+      }
+    ]
+  }
+];

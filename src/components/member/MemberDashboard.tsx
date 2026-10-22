@@ -23,11 +23,13 @@ import {
   CreditCard,
   Sparkles,
   CheckCircle2,
-  Megaphone
+  Megaphone,
+  Heart
 } from 'lucide-react';
 import { QRScannerModal } from './QRScannerModal';
 import { DigitalCardModal } from './DigitalCardModal';
 import { MemberDashboardSkeleton } from '../ui/Skeleton';
+import { staleWhileRevalidate } from '../../lib/cache';
 
 interface MemberDashboardProps {
   onSelectTab: (tab: string) => void;
@@ -51,24 +53,36 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
 
   const fetchData = async () => {
     try {
-      // 1. Fetch Events
-      const eventsSnap = await getDocs(query(collection(db, 'events')));
-      const evList = eventsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ChurchEvent));
-      // Sort upcoming by date
-      evList.sort((a, b) => a.date.localeCompare(b.date));
-      setEvents(evList);
+      const cacheKey = `dashboard_data_${member?.id || 'guest'}`;
+      await staleWhileRevalidate(cacheKey, async () => {
+        const eventsPromise = getDocs(query(collection(db, 'events')));
+        const attPromise = member?.id 
+          ? getDocs(query(collection(db, 'attendance'), where('memberId', '==', member.id)))
+          : Promise.resolve({ docs: [] } as any);
+        const annPromise = getDocs(query(collection(db, 'announcements'), limit(3)));
 
-      // 2. Fetch User's Attendance
-      if (member?.id) {
-        const attQuery = query(collection(db, 'attendance'), where('memberId', '==', member.id));
-        const attSnap = await getDocs(attQuery);
-        const attList = attSnap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord));
-        setMyAttendance(attList);
-      }
+        // Run all three queries simultaneously in parallel
+        const [eventsSnap, attSnap, annSnap] = await Promise.all([
+          eventsPromise,
+          attPromise,
+          annPromise
+        ]);
 
-      // 3. Fetch Recent Announcements
-      const annSnap = await getDocs(query(collection(db, 'announcements'), limit(2)));
-      setAnnouncements(annSnap.docs.map(d => ({ id: d.id, ...d.data() } as Announcement)));
+        const evList = eventsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as ChurchEvent));
+        evList.sort((a: ChurchEvent, b: ChurchEvent) => a.date.localeCompare(b.date));
+
+        const attList = attSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as AttendanceRecord));
+        const annList = annSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Announcement));
+
+        return { events: evList, attendance: attList, announcements: annList };
+      }, (data, fromCache) => {
+        setEvents(data.events);
+        setMyAttendance(data.attendance);
+        setAnnouncements(data.announcements);
+        if (fromCache) {
+          setLoading(false);
+        }
+      });
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
     } finally {
@@ -388,7 +402,39 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
         </div>
       </div>
 
-      {/* 6. ANNOUNCEMENTS PREVIEW */}
+      {/* 6. PRAYER WALL SPOTLIGHT BANNER */}
+      <Card className="p-5 bg-gradient-to-r from-teal-900 via-emerald-950 to-slate-900 text-white border-teal-900/50 shadow-sm relative overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+          <div className="space-y-1 max-w-xl">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
+                <Heart className="w-3 h-3 text-rose-400 fill-rose-400" />
+                Congregation Prayer Wall
+              </span>
+              <span className="text-xs text-slate-300">Live Agreement</span>
+            </div>
+            <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
+              Stand in the Gap with Your Church Family
+            </h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Pray over active petitions, post your personal needs, and rejoice in answered prayers and testimonies.
+            </p>
+          </div>
+
+          <Button
+            type="button"
+            variant="primary"
+            size="md"
+            icon={<Heart className="w-4 h-4 fill-white text-white" />}
+            onClick={() => onSelectTab('prayers')}
+            className="shrink-0 text-xs font-bold shadow-md shadow-emerald-500/20 bg-emerald-600 hover:bg-emerald-500"
+          >
+            Visit Prayer Wall
+          </Button>
+        </div>
+      </Card>
+
+      {/* 7. ANNOUNCEMENTS PREVIEW */}
       {announcements.length > 0 && (
         <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between px-1">

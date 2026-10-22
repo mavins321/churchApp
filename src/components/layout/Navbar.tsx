@@ -77,34 +77,34 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>AI Assistant</span>
           </button>
 
-          {/* Role Switcher for seamless testing */}
-          <div className="hidden md:flex items-center border border-slate-200 rounded-xl p-0.5 bg-slate-50 text-xs">
+          {/* Role Switcher for instant access to Member and Admin portals */}
+          <div className="flex items-center border border-slate-200 rounded-xl p-0.5 bg-slate-100/80 text-xs shadow-xs">
             <button
               onClick={() => {
                 switchRoleForDemo('member');
                 onSelectTab('home');
               }}
-              className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+              className={`px-2 sm:px-2.5 py-1 rounded-lg font-bold transition-all text-[11px] sm:text-xs ${
                 role === 'member'
-                  ? 'bg-white text-emerald-700 shadow-xs'
+                  ? 'bg-white text-emerald-800 shadow-xs'
                   : 'text-slate-500 hover:text-slate-900'
               }`}
             >
-              Member View
+              Member
             </button>
             <button
               onClick={() => {
                 switchRoleForDemo('admin');
                 onSelectTab('admin-dashboard');
               }}
-              className={`px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1 ${
+              className={`px-2 sm:px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 text-[11px] sm:text-xs ${
                 role === 'admin' || role === 'super_admin'
-                  ? 'bg-white text-emerald-700 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-900'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <ShieldCheck className="w-3.5 h-3.5" />
-              Admin View
+              <span>Admin</span>
             </button>
           </div>
 

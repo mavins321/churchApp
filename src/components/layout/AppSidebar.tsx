@@ -17,7 +17,8 @@ import {
   ShieldCheck,
   ArrowRightLeft,
   X,
-  Church
+  Church,
+  Heart
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -55,6 +56,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   const memberNavItems: NavItem[] = [
     { id: 'home', label: 'Overview', icon: Home, description: 'Dashboard & Next Service' },
     { id: 'activities', label: 'Activities', icon: Calendar, description: 'Services & Gatherings' },
+    { id: 'prayers', label: 'Prayer Wall', icon: Heart, description: 'Petitions & Testimonies' },
     { id: 'attendance', label: 'My Attendance', icon: ClipboardCheck, description: 'Personal History' },
     { id: 'announcements', label: 'Announcements', icon: Megaphone, description: 'Church Bulletins' },
     { 
@@ -71,6 +73,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     { id: 'admin-dashboard', label: 'Admin Overview', icon: LayoutDashboard, description: 'Church Metrics & Operations' },
     { id: 'admin-members', label: 'Members Directory', icon: Users, description: 'Registry & Pastoral Care' },
     { id: 'admin-events', label: 'Activities & Services', icon: Calendar, description: 'Schedules & Check-in' },
+    { id: 'prayers', label: 'Prayer Wall', icon: Heart, description: 'Intercessions & Testimonies' },
     { id: 'admin-attendance', label: 'Attendance Roll Call', icon: ClipboardCheck, description: 'Live Headcount & Audits' },
     { id: 'admin-departments', label: 'Departments', icon: Building2, description: 'Ministry Teams' },
     { id: 'admin-groups', label: 'Cell Groups', icon: FolderGit2, description: 'Fellowship Circles' },
@@ -111,22 +114,49 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           )}
         </div>
 
-        {/* Portal Context Banner */}
-        <div className="px-3.5 py-2.5 bg-gradient-to-br from-emerald-50 to-teal-50/60 border border-emerald-200/70 rounded-2xl">
+        {/* Portal Context Banner & Quick Switcher */}
+        <div className="p-3 bg-gradient-to-br from-emerald-50 to-teal-50/70 border border-emerald-200/80 rounded-2xl space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-              {isAdminRole ? 'Administration' : 'Congregation Portal'}
+              {isAdminRole ? 'Church Administration' : 'Congregation Portal'}
             </span>
-            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100/80 text-emerald-800">
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
               {isAdminRole ? 'Admin' : 'Member'}
             </span>
           </div>
-          <p className="text-xs text-slate-600 font-medium mt-1 truncate">
-            {member?.fullName || userProfile?.displayName || 'FaithTrack Member'}
+          <p className="text-xs text-slate-700 font-bold truncate">
+            {member?.fullName || userProfile?.displayName || 'FaithTrack Cathedral'}
           </p>
-          <p className="text-[11px] text-emerald-700 font-mono mt-0.5">
-            {member?.membershipNumber || 'FT-2026-PORTAL'}
-          </p>
+
+          <div className="flex items-center gap-1 p-0.5 bg-white/90 rounded-xl border border-emerald-200/70 text-xs">
+            <button
+              onClick={() => {
+                switchRoleForDemo('member');
+                handleItemClick('home');
+              }}
+              className={`flex-1 py-1 px-2 rounded-lg font-bold text-center transition-all ${
+                !isAdminRole
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Member
+            </button>
+            <button
+              onClick={() => {
+                switchRoleForDemo('admin');
+                handleItemClick('admin-dashboard');
+              }}
+              className={`flex-1 py-1 px-2 rounded-lg font-bold text-center transition-all flex items-center justify-center gap-1 ${
+                isAdminRole
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Admin</span>
+            </button>
+          </div>
         </div>
 
         {/* Navigation Sections */}

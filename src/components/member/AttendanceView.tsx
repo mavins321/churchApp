@@ -9,6 +9,7 @@ import { SearchInput } from '../ui/SearchInput';
 import { PresentBadge } from '../ui/Badge';
 import { formatDateReadable, formatTime12Hour } from '../../lib/utils';
 import { AttendanceViewSkeleton } from '../ui/Skeleton';
+import { staleWhileRevalidate } from '../../lib/cache';
 import { 
   ClipboardCheck, 
   Calendar, 
@@ -35,16 +36,24 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({ onSelectTab }) =
     const fetchAttendanceData = async () => {
       if (!member?.id) return;
       try {
-        const attQuery = query(collection(db, 'attendance'), where('memberId', '==', member.id));
-        const attSnap = await getDocs(attQuery);
-        const list = attSnap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord));
-        // Sort descending by checkInTime
-        list.sort((a, b) => b.checkInTime.localeCompare(a.checkInTime));
-        setAttendance(list);
+        const cacheKey = `attendance_view_${member.id}`;
+        await staleWhileRevalidate(cacheKey, async () => {
+          const attPromise = getDocs(query(collection(db, 'attendance'), where('memberId', '==', member.id)));
+          const evPromise = getDocs(collection(db, 'events'));
 
-        // Fetch events for denominator
-        const evSnap = await getDocs(collection(db, 'events'));
-        setEvents(evSnap.docs.map(d => ({ id: d.id, ...d.data() } as ChurchEvent)));
+          const [attSnap, evSnap] = await Promise.all([attPromise, evPromise]);
+          const list = attSnap.docs.map(d => ({ id: d.id, ...d.data() } as AttendanceRecord));
+          list.sort((a, b) => b.checkInTime.localeCompare(a.checkInTime));
+          const evList = evSnap.docs.map(d => ({ id: d.id, ...d.data() } as ChurchEvent));
+
+          return { attendance: list, events: evList };
+        }, (data, fromCache) => {
+          setAttendance(data.attendance);
+          setEvents(data.events);
+          if (fromCache) {
+            setLoading(false);
+          }
+        });
       } catch (err) {
         console.error('Error fetching attendance records:', err);
       } finally {
