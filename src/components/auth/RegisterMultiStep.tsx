@@ -477,24 +477,24 @@ export const RegisterMultiStep: React.FC<RegisterMultiStepProps> = ({
 
   return (
     <div className="min-h-[85vh] flex items-center justify-center px-4 py-8">
-      <Card className="w-full max-w-xl p-6 sm:p-8 border-slate-200/80 shadow-lg relative overflow-hidden">
+      <Card className="w-full max-w-xl p-4 sm:p-8 border-slate-200/80 shadow-lg relative overflow-hidden">
         {/* Top Header & Navigation */}
         {step < 5 && (
           <div className="mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 bg-emerald-600 text-white rounded-xl flex items-center justify-center font-bold shadow-xs">
+            <div className="flex items-center justify-between gap-2 mb-4">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 bg-emerald-600 text-white rounded-xl flex items-center justify-center font-bold shadow-xs shrink-0">
                   FT
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900 leading-tight">Member Registration</h2>
+                <div className="min-w-0">
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-tight truncate">Member Registration</h2>
                   <p className="text-xs text-slate-500">Step {step} of 4</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={onSwitchToLogin}
-                className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:underline"
+                className="text-xs font-semibold text-emerald-700 hover:text-emerald-800 hover:underline shrink-0"
                 disabled={loading}
               >
                 Sign In Instead
@@ -502,12 +502,12 @@ export const RegisterMultiStep: React.FC<RegisterMultiStepProps> = ({
             </div>
 
             {/* Stepper Progress Indicator */}
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
               {stepsList.map((s) => {
                 const isActive = s.num === step;
                 const isPassed = s.num < step;
                 return (
-                  <div key={s.num} className="flex flex-col gap-1">
+                  <div key={s.num} className="flex flex-col gap-1 min-w-0">
                     <div
                       className={`h-1.5 rounded-full transition-all duration-300 ${
                         isPassed
@@ -518,7 +518,7 @@ export const RegisterMultiStep: React.FC<RegisterMultiStepProps> = ({
                       }`}
                     />
                     <span
-                      className={`text-[11px] font-medium transition-colors ${
+                      className={`text-[10px] sm:text-[11px] font-medium transition-colors truncate ${
                         isActive
                           ? 'text-emerald-700 font-bold'
                           : isPassed

@@ -2,6 +2,7 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Navbar } from './components/layout/Navbar';
 import { AppSidebar } from './components/layout/AppSidebar';
+import { MobileBottomNav } from './components/layout/MobileBottomNav';
 import { LoginView } from './components/auth/LoginView';
 
 // Icons & Utilities
@@ -174,7 +175,7 @@ const MainApp: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/70 text-slate-900 flex flex-col font-sans antialiased">
+    <div className="min-h-screen bg-slate-50/70 text-slate-900 flex flex-col font-sans antialiased overflow-x-clip">
       {/* Top Navbar */}
       <Navbar
         currentTab={currentTab}
@@ -201,7 +202,7 @@ const MainApp: React.FC = () => {
         />
 
         {/* Main Content Area with Lazy Loading Suspense */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 min-w-0">
+        <main className="flex-1 p-3.5 sm:p-6 lg:p-8 pb-24 md:pb-8 min-w-0">
           <Suspense fallback={<ViewFallback />}>
             {/* Member View Routes (accessible to members and admins) */}
             {currentTab === 'home' && (
@@ -236,14 +237,22 @@ const MainApp: React.FC = () => {
         </main>
       </div>
 
+      {/* Mobile Bottom Navigation Bar */}
+      <MobileBottomNav
+        currentTab={currentTab}
+        onSelectTab={handleSelectTab}
+        portalView={isAdminRole ? portalView : 'member'}
+        onOpenMenu={() => setIsMobileNavOpen(true)}
+      />
+
       {/* Floating AI Assistant Action Button */}
       <button
         onClick={() => setIsAIOpen(true)}
-        className="fixed bottom-6 right-6 z-40 p-3.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-700/30 active:scale-95 transition-all flex items-center justify-center group"
+        className="fixed bottom-20 right-4 md:bottom-6 md:right-6 z-30 p-3 sm:p-3.5 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-700/30 active:scale-95 transition-all flex items-center justify-center group"
         aria-label="Open Church AI Assistant"
         title="Ask Church AI"
       >
-        <Sparkles className="w-6 h-6 animate-pulse group-hover:scale-110 transition-transform" />
+        <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 animate-pulse group-hover:scale-110 transition-transform" />
       </button>
 
       {/* Suspense Modals */}

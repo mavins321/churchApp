@@ -262,32 +262,32 @@ export const AttendanceManagement: React.FC = () => {
 
       {/* EVENT STATS BANNER */}
       {currentEvent && (
-        <Card className="p-6 bg-gradient-to-br from-emerald-800 to-teal-950 text-white rounded-3xl shadow-sm">
+        <Card className="p-4 sm:p-6 bg-gradient-to-br from-emerald-800 to-teal-950 text-white rounded-3xl shadow-sm">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
+            <div className="min-w-0">
               <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider block">
                 {currentEvent.type}
               </span>
-              <h2 className="text-2xl font-black tracking-tight">{currentEvent.title}</h2>
+              <h2 className="text-xl sm:text-2xl font-black tracking-tight">{currentEvent.title}</h2>
               <p className="text-xs text-emerald-100/80 mt-0.5">
                 {formatDateReadable(currentEvent.date)} • {currentEvent.location}
               </p>
             </div>
 
-            <div className="flex items-center gap-6 bg-white/10 px-6 py-3 rounded-2xl backdrop-blur-md">
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:gap-6 bg-white/10 px-3 sm:px-6 py-3 rounded-2xl backdrop-blur-md w-full sm:w-auto">
               <div className="text-center">
                 <span className="text-[10px] text-emerald-200 uppercase tracking-wider block">Present</span>
-                <span className="text-2xl font-black">{presentCount}</span>
+                <span className="text-xl sm:text-2xl font-black">{presentCount}</span>
               </div>
-              <div className="w-px h-8 bg-white/20" />
-              <div className="text-center">
+              <div className="hidden sm:block w-px h-8 bg-white/20" />
+              <div className="text-center border-x border-white/15 sm:border-x-0">
                 <span className="text-[10px] text-emerald-200 uppercase tracking-wider block">Absent</span>
-                <span className="text-2xl font-black">{absentCount}</span>
+                <span className="text-xl sm:text-2xl font-black">{absentCount}</span>
               </div>
-              <div className="w-px h-8 bg-white/20" />
+              <div className="hidden sm:block w-px h-8 bg-white/20" />
               <div className="text-center">
                 <span className="text-[10px] text-emerald-200 uppercase tracking-wider block">Attendance</span>
-                <span className="text-2xl font-black text-emerald-300">{attendanceRate}%</span>
+                <span className="text-xl sm:text-2xl font-black text-emerald-300">{attendanceRate}%</span>
               </div>
             </div>
           </div>
@@ -295,13 +295,13 @@ export const AttendanceManagement: React.FC = () => {
       )}
 
       {/* MEMBER ATTENDANCE LIST & CORRECTIONS */}
-      <Card className="p-5 bg-white border-slate-200/80 space-y-4">
-        <div className="flex items-center justify-between">
+      <Card className="p-4 sm:p-5 bg-white border-slate-200/80 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
           <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
             Congregation Roll Call ({filteredMembers.length} Members)
           </h3>
-          <span className="text-xs text-slate-400">
-            Click to manually verify or correct attendance with audit log
+          <span className="text-[11px] sm:text-xs text-slate-400">
+            Tap to verify or correct attendance with audit log
           </span>
         </div>
 
@@ -315,14 +315,14 @@ export const AttendanceManagement: React.FC = () => {
                 key={m.id}
                 className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/70 p-2 rounded-2xl transition-colors"
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <Avatar name={m.fullName} photoUrl={m.photoUrl} size="md" />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-bold text-slate-900 text-sm">{m.fullName}</p>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <p className="font-bold text-slate-900 text-sm truncate">{m.fullName}</p>
                       <span className="text-[11px] font-mono text-slate-400">{m.membershipNumber}</span>
                     </div>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-slate-500 truncate">
                       {m.departmentName || 'General'} • {m.groupName || 'Fellowship'}
                     </p>
                   </div>

@@ -120,22 +120,22 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
   return (
     <div className="space-y-6 pb-12 w-full max-w-6xl mx-auto">
       {/* 1. Warm Greeting & Quick ID Card trigger */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-emerald-700 via-emerald-800 to-teal-900 text-white p-6 sm:p-8 rounded-3xl shadow-sm relative overflow-hidden">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-emerald-700 via-emerald-800 to-teal-900 text-white p-5 sm:p-8 rounded-3xl shadow-sm relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative z-10">
+        <div className="relative z-10 min-w-0">
           <p className="text-xs font-semibold text-emerald-200 tracking-wider uppercase">
             FaithTrack Cathedral
           </p>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight mt-1">
+          <h1 className="text-xl sm:text-3xl font-extrabold tracking-tight mt-1">
             {greeting}, {firstName} 👋
           </h1>
-          <p className="text-xs sm:text-sm text-emerald-100/90 mt-1">
+          <p className="text-xs sm:text-sm text-emerald-100/90 mt-1 truncate">
             {member?.departmentName ? `${member.departmentName} Department` : 'Welcome to worship'} • {member?.membershipNumber}
           </p>
         </div>
 
-        <div className="relative z-10 flex items-center gap-2">
+        <div className="relative z-10 flex flex-wrap items-center gap-2">
           <Button
             type="button"
             variant="outline"
@@ -174,9 +174,9 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
         </div>
 
         {nextEvent ? (
-          <Card className="p-6 sm:p-7 border-slate-200/90 hover:border-emerald-200 transition-all bg-white relative overflow-hidden">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div className="space-y-2">
+          <Card className="p-4 sm:p-7 border-slate-200/90 hover:border-emerald-200 transition-all bg-white relative overflow-hidden">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+              <div className="space-y-2 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
                     {nextEvent.type}
@@ -190,17 +190,17 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
                   )}
                 </div>
 
-                <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                <h3 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight">
                   {nextEvent.title}
                 </h3>
 
-                <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 pt-1">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs text-slate-500 pt-1">
                   <span className="flex items-center gap-1.5 font-medium text-slate-700">
-                    <Clock className="w-4 h-4 text-emerald-600" />
+                    <Clock className="w-4 h-4 text-emerald-600 shrink-0" />
                     {formatTime12Hour(nextEvent.startTime)} – {formatTime12Hour(nextEvent.endTime)}
                   </span>
                   <span className="flex items-center gap-1.5 font-medium text-slate-700">
-                    <MapPin className="w-4 h-4 text-slate-400" />
+                    <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
                     {nextEvent.location}
                   </span>
                 </div>
@@ -209,8 +209,8 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
               {/* Action Button */}
               <div className="shrink-0 flex flex-col sm:items-end gap-2">
                 {nextEventAttendance ? (
-                  <div className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-sm">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  <div className="flex items-center justify-center sm:justify-start gap-2 px-4 py-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-sm">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                     <span>✓ You're checked in</span>
                   </div>
                 ) : (
@@ -259,7 +259,7 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
               setSelectedEventForCheckIn(nextEvent);
               setIsScannerOpen(true);
             }}
-            className="flex flex-col items-center justify-center p-5 rounded-3xl bg-white border border-slate-200/80 shadow-xs hover:shadow-md hover:border-emerald-300 transition-all group active:scale-[0.98] text-center"
+            className="flex flex-col items-center justify-center p-4 sm:p-5 rounded-3xl bg-white border border-slate-200/80 shadow-xs hover:shadow-md hover:border-emerald-300 transition-all group active:scale-[0.98] text-center"
           >
             <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors flex items-center justify-center mb-2.5">
               <QrCode className="w-6 h-6" />

@@ -95,15 +95,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   return (
     <div className="space-y-6 pb-12 w-full max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-xs">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
               Admin Portal
             </span>
             <span className="text-xs text-slate-400">FaithTrack Cathedral</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight mt-1">
+          <h1 className="text-xl sm:text-3xl font-black text-slate-900 tracking-tight mt-1">
             {greeting}, Administrator 👋
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
@@ -111,13 +111,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <Button
             variant="outline"
             size="md"
             icon={<Sparkles className="w-4 h-4 text-emerald-600" />}
             onClick={onOpenAIAssistant}
-            className="text-xs"
+            className="text-xs flex-1 sm:flex-initial"
           >
             Leadership AI
           </Button>
@@ -128,7 +128,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               size="md"
               icon={<QrCode className="w-4 h-4" />}
               onClick={() => setQrModalEvent(nextEvent)}
-              className="text-xs"
+              className="text-xs flex-1 sm:flex-initial"
             >
               Launch Service QR
             </Button>
@@ -137,49 +137,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
 
       {/* Primary KPI Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Total Members */}
-        <Card className="p-5 bg-white border-slate-200/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Members</span>
-            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+        <Card className="p-3.5 sm:p-5 bg-white border-slate-200/80 flex flex-col justify-between">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider leading-tight">Total Members</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-emerald-50 text-emerald-600 shrink-0">
               <Users className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <span className="text-3xl font-black text-slate-900">{membersCount || 1}</span>
-            <span className="text-xs text-emerald-700 font-semibold block mt-0.5">
+          <div className="mt-2.5 sm:mt-3">
+            <span className="text-2xl sm:text-3xl font-black text-slate-900">{membersCount || 1}</span>
+            <span className="text-[11px] sm:text-xs text-emerald-700 font-semibold block mt-0.5">
               {activeMembersCount || 1} active profiles
             </span>
           </div>
         </Card>
 
         {/* Present Today */}
-        <Card className="p-5 bg-white border-slate-200/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Present Today</span>
-            <div className="p-2 rounded-xl bg-teal-50 text-teal-600">
+        <Card className="p-3.5 sm:p-5 bg-white border-slate-200/80 flex flex-col justify-between">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider leading-tight">Present Today</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-teal-50 text-teal-600 shrink-0">
               <ClipboardCheck className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <span className="text-3xl font-black text-slate-900">{presentCount}</span>
-            <span className="text-xs text-slate-500 font-medium block mt-0.5">
+          <div className="mt-2.5 sm:mt-3">
+            <span className="text-2xl sm:text-3xl font-black text-slate-900">{presentCount}</span>
+            <span className="text-[11px] sm:text-xs text-slate-500 font-medium block mt-0.5">
               of {expectedToday} expected
             </span>
           </div>
         </Card>
 
         {/* Attendance Rate */}
-        <Card className="p-5 bg-white border-slate-200/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Attendance Rate</span>
-            <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+        <Card className="p-3.5 sm:p-5 bg-white border-slate-200/80 flex flex-col justify-between">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider leading-tight">Attendance Rate</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-indigo-50 text-indigo-600 shrink-0">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <span className="text-3xl font-black text-slate-900">{attendanceRate}%</span>
+          <div className="mt-2.5 sm:mt-3">
+            <span className="text-2xl sm:text-3xl font-black text-slate-900">{attendanceRate}%</span>
             <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
               <div className="bg-indigo-600 h-full rounded-full" style={{ width: `${attendanceRate}%` }} />
             </div>
@@ -187,16 +187,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </Card>
 
         {/* New Members */}
-        <Card className="p-5 bg-white border-slate-200/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">New Registrations</span>
-            <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
+        <Card className="p-3.5 sm:p-5 bg-white border-slate-200/80 flex flex-col justify-between">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider leading-tight">New Registrations</span>
+            <div className="p-1.5 sm:p-2 rounded-xl bg-amber-50 text-amber-600 shrink-0">
               <UserCheck className="w-4 h-4" />
             </div>
           </div>
-          <div className="mt-3">
-            <span className="text-3xl font-black text-slate-900">{Math.max(1, membersCount)}</span>
-            <span className="text-xs text-emerald-600 font-semibold block mt-0.5">
+          <div className="mt-2.5 sm:mt-3">
+            <span className="text-2xl sm:text-3xl font-black text-slate-900">{Math.max(1, membersCount)}</span>
+            <span className="text-[11px] sm:text-xs text-emerald-600 font-semibold block mt-0.5">
               Active congregation
             </span>
           </div>
@@ -205,10 +205,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Today's Activity & Live Projection Banner */}
       {nextEvent && (
-        <Card className="p-6 bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-white border-none shadow-lg">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
+        <Card className="p-4 sm:p-6 bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-white border-none shadow-lg">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6">
+            <div className="space-y-2 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
                   Target Activity: {nextEvent.type}
                 </span>
@@ -217,23 +217,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </span>
               </div>
 
-              <h3 className="text-2xl font-black tracking-tight">{nextEvent.title}</h3>
+              <h3 className="text-xl sm:text-2xl font-black tracking-tight">{nextEvent.title}</h3>
               <p className="text-xs text-slate-300">
                 {formatTime12Hour(nextEvent.startTime)} – {formatTime12Hour(nextEvent.endTime)} • {nextEvent.location}
               </p>
 
-              <div className="flex items-center gap-6 pt-2">
+              <div className="grid grid-cols-3 gap-3 sm:flex sm:items-center sm:gap-6 pt-2">
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Present</span>
-                  <span className="text-xl font-bold text-white">{presentCount}</span>
+                  <span className="text-lg sm:text-xl font-bold text-white">{presentCount}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Expected</span>
-                  <span className="text-xl font-bold text-slate-300">{expectedToday}</span>
+                  <span className="text-lg sm:text-xl font-bold text-slate-300">{expectedToday}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Coverage</span>
-                  <span className="text-xl font-bold text-emerald-400">{attendanceRate}%</span>
+                  <span className="text-lg sm:text-xl font-bold text-emerald-400">{attendanceRate}%</span>
                 </div>
               </div>
             </div>
@@ -334,12 +334,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 key={dept.id}
                 className="p-3 bg-slate-50/70 rounded-2xl border border-slate-100 flex items-center justify-between gap-3 text-xs"
               >
-                <div>
-                  <p className="font-bold text-slate-800">{dept.name}</p>
-                  <p className="text-[11px] text-slate-400">Leader: {dept.leaderName || 'Pastoral Team'}</p>
+                <div className="min-w-0">
+                  <p className="font-bold text-slate-800 truncate">{dept.name}</p>
+                  <p className="text-[11px] text-slate-400 truncate">Leader: {dept.leaderName || 'Pastoral Team'}</p>
                 </div>
-                <div className="text-right">
-                  <span className="font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-100">
+                <div className="text-right shrink-0">
+                  <span className="font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-100 whitespace-nowrap">
                     {dept.memberCount || 12} members
                   </span>
                 </div>

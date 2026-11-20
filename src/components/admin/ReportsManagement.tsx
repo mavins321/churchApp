@@ -114,12 +114,13 @@ export const ReportsManagement: React.FC = () => {
           <p className="text-xs text-slate-500">Generate, analyze, and export congregation attendance records</p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
             icon={<Download className="w-4 h-4 text-emerald-600" />}
             onClick={handleExportCSV}
+            className="flex-1 sm:flex-initial"
           >
             EXPORT CSV
           </Button>
@@ -128,6 +129,7 @@ export const ReportsManagement: React.FC = () => {
             size="sm"
             icon={<FileText className="w-4 h-4" />}
             onClick={handleExportPDF}
+            className="flex-1 sm:flex-initial"
           >
             EXPORT PDF
           </Button>
@@ -157,8 +159,8 @@ export const ReportsManagement: React.FC = () => {
       </div>
 
       {/* Report Data Table */}
-      <Card className="p-6 bg-white border-slate-200/80 space-y-4">
-        <div className="flex items-center justify-between">
+      <Card className="p-4 sm:p-6 bg-white border-slate-200/80 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
           <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
             {reportType === 'activity' && 'Event Check-In Records'}
             {reportType === 'department' && 'Department Attendance & Workforce Metrics'}
@@ -171,112 +173,177 @@ export const ReportsManagement: React.FC = () => {
         </div>
 
         {reportType === 'activity' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
-                <tr>
-                  <th className="px-4 py-3">Event</th>
-                  <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Member Name</th>
-                  <th className="px-4 py-3">Member ID</th>
-                  <th className="px-4 py-3">Department</th>
-                  <th className="px-4 py-3">Check-In Time</th>
-                  <th className="px-4 py-3">Method</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {attendance.slice(0, 20).map((a) => (
-                  <tr key={a.id} className="hover:bg-slate-50/50">
-                    <td className="px-4 py-3 font-semibold text-slate-800">{a.eventTitle}</td>
-                    <td className="px-4 py-3 text-slate-500">{formatDateReadable(a.eventDate)}</td>
-                    <td className="px-4 py-3 font-bold text-slate-900">{a.memberName}</td>
-                    <td className="px-4 py-3 font-mono text-slate-600">{a.membershipNumber}</td>
-                    <td className="px-4 py-3 text-slate-600">{a.departmentName || 'General'}</td>
-                    <td className="px-4 py-3 text-slate-700">{a.checkInTimeFormatted || formatTime12Hour(a.checkInTime)}</td>
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[10px] font-semibold">
-                        {a.method.toUpperCase()}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {attendance.length === 0 && (
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
                   <tr>
-                    <td colSpan={7} className="text-center py-6 text-slate-400">
-                      No attendance check-ins on record.
-                    </td>
+                    <th className="px-4 py-3">Event</th>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Member Name</th>
+                    <th className="px-4 py-3">Member ID</th>
+                    <th className="px-4 py-3">Department</th>
+                    <th className="px-4 py-3">Check-In Time</th>
+                    <th className="px-4 py-3">Method</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {reportType === 'department' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
-                <tr>
-                  <th className="px-4 py-3">Department Name</th>
-                  <th className="px-4 py-3">Department Head</th>
-                  <th className="px-4 py-3">Total Workers</th>
-                  <th className="px-4 py-3">Attendance Check-Ins</th>
-                  <th className="px-4 py-3">Participation Rate</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {departments.map((d) => {
-                  const checkIns = attendance.filter(a => a.departmentName === d.name).length;
-                  const rate = Math.min(100, Math.round((checkIns / Math.max(1, d.memberCount || 10)) * 100));
-                  return (
-                    <tr key={d.id} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-3 font-bold text-slate-900">{d.name}</td>
-                      <td className="px-4 py-3 text-slate-600">{d.leaderName || 'Pastoral Board'}</td>
-                      <td className="px-4 py-3 text-slate-800 font-semibold">{d.memberCount || 10}</td>
-                      <td className="px-4 py-3 text-emerald-700 font-bold">{checkIns}</td>
-                      <td className="px-4 py-3 font-bold text-slate-900">{rate}%</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {reportType === 'member' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
-                <tr>
-                  <th className="px-4 py-3">Member Name</th>
-                  <th className="px-4 py-3">Membership ID</th>
-                  <th className="px-4 py-3">Department</th>
-                  <th className="px-4 py-3">Phone</th>
-                  <th className="px-4 py-3">Total Attended</th>
-                  <th className="px-4 py-3">Consistency</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {members.slice(0, 20).map((m) => {
-                  const count = attendance.filter(a => a.memberId === m.id).length;
-                  return (
-                    <tr key={m.id} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-3 font-bold text-slate-900">{m.fullName}</td>
-                      <td className="px-4 py-3 font-mono text-slate-600">{m.membershipNumber}</td>
-                      <td className="px-4 py-3 text-slate-600">{m.departmentName || 'General'}</td>
-                      <td className="px-4 py-3 text-slate-600">{m.phone}</td>
-                      <td className="px-4 py-3 font-bold text-emerald-700">{count} services</td>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {attendance.slice(0, 20).map((a) => (
+                    <tr key={a.id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-semibold text-slate-800">{a.eventTitle}</td>
+                      <td className="px-4 py-3 text-slate-500">{formatDateReadable(a.eventDate)}</td>
+                      <td className="px-4 py-3 font-bold text-slate-900">{a.memberName}</td>
+                      <td className="px-4 py-3 font-mono text-slate-600">{a.membershipNumber}</td>
+                      <td className="px-4 py-3 text-slate-600">{a.departmentName || 'General'}</td>
+                      <td className="px-4 py-3 text-slate-700">{a.checkInTimeFormatted || formatTime12Hour(a.checkInTime)}</td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${count >= 3 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
-                          {count >= 3 ? 'High' : 'Regular'}
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[10px] font-semibold">
+                          {a.method.toUpperCase()}
                         </span>
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                  {attendance.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="text-center py-6 text-slate-400">
+                        No attendance check-ins on record.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="md:hidden space-y-2.5">
+              {attendance.slice(0, 20).map((a) => (
+                <div key={a.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-100 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-slate-900 truncate">{a.memberName}</span>
+                    <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 text-[10px] font-semibold shrink-0">
+                      {a.method.toUpperCase()}
+                    </span>
+                  </div>
+                  <p className="text-slate-700 font-medium">{a.eventTitle}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                    <span>{formatDateReadable(a.eventDate)} • {a.checkInTimeFormatted || formatTime12Hour(a.checkInTime)}</span>
+                    <span className="font-mono">{a.membershipNumber}</span>
+                  </div>
+                </div>
+              ))}
+              {attendance.length === 0 && (
+                <p className="text-center py-6 text-slate-400 text-xs">No attendance check-ins on record.</p>
+              )}
+            </div>
+          </>
+        )}
+
+        {reportType === 'department' && (
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Department Name</th>
+                    <th className="px-4 py-3">Department Head</th>
+                    <th className="px-4 py-3">Total Workers</th>
+                    <th className="px-4 py-3">Attendance Check-Ins</th>
+                    <th className="px-4 py-3">Participation Rate</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {departments.map((d) => {
+                    const checkIns = attendance.filter(a => a.departmentName === d.name).length;
+                    const rate = Math.min(100, Math.round((checkIns / Math.max(1, d.memberCount || 10)) * 100));
+                    return (
+                      <tr key={d.id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-bold text-slate-900">{d.name}</td>
+                        <td className="px-4 py-3 text-slate-600">{d.leaderName || 'Pastoral Board'}</td>
+                        <td className="px-4 py-3 text-slate-800 font-semibold">{d.memberCount || 10}</td>
+                        <td className="px-4 py-3 text-emerald-700 font-bold">{checkIns}</td>
+                        <td className="px-4 py-3 font-bold text-slate-900">{rate}%</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="md:hidden space-y-2.5">
+              {departments.map((d) => {
+                const checkIns = attendance.filter(a => a.departmentName === d.name).length;
+                const rate = Math.min(100, Math.round((checkIns / Math.max(1, d.memberCount || 10)) * 100));
+                return (
+                  <div key={d.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-100 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-slate-900">{d.name}</span>
+                      <span className="font-bold text-emerald-700">{rate}%</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">Head: {d.leaderName || 'Pastoral Board'}</p>
+                    <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1">
+                      <span>Workers: <strong>{d.memberCount || 10}</strong></span>
+                      <span>Check-Ins: <strong className="text-emerald-700">{checkIns}</strong></span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {reportType === 'member' && (
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-3">Member Name</th>
+                    <th className="px-4 py-3">Membership ID</th>
+                    <th className="px-4 py-3">Department</th>
+                    <th className="px-4 py-3">Phone</th>
+                    <th className="px-4 py-3">Total Attended</th>
+                    <th className="px-4 py-3">Consistency</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {members.slice(0, 20).map((m) => {
+                    const count = attendance.filter(a => a.memberId === m.id).length;
+                    return (
+                      <tr key={m.id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-bold text-slate-900">{m.fullName}</td>
+                        <td className="px-4 py-3 font-mono text-slate-600">{m.membershipNumber}</td>
+                        <td className="px-4 py-3 text-slate-600">{m.departmentName || 'General'}</td>
+                        <td className="px-4 py-3 text-slate-600">{m.phone}</td>
+                        <td className="px-4 py-3 font-bold text-emerald-700">{count} services</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${count >= 3 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
+                            {count >= 3 ? 'High' : 'Regular'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="md:hidden space-y-2.5">
+              {members.slice(0, 20).map((m) => {
+                const count = attendance.filter(a => a.memberId === m.id).length;
+                return (
+                  <div key={m.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-100 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-slate-900 truncate">{m.fullName}</span>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${count >= 3 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>
+                        {count >= 3 ? 'High' : 'Regular'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">{m.departmentName || 'General'} • {m.membershipNumber}</p>
+                    <div className="flex items-center justify-between text-[11px] text-slate-600">
+                      <span>{m.phone}</span>
+                      <span className="font-bold text-emerald-700">{count} services</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
 
         {reportType === 'monthly' && (

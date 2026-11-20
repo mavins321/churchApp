@@ -305,7 +305,7 @@ export const EventsManagement: React.FC = () => {
           size="md"
           icon={<Plus className="w-4 h-4" />}
           onClick={handleOpenCreate}
-          className="text-xs"
+          className="text-xs w-full sm:w-auto"
         >
           Create New Activity
         </Button>
@@ -320,11 +320,11 @@ export const EventsManagement: React.FC = () => {
       )}
 
       {/* Automated Reminders Engine Card */}
-      <Card className="p-5 bg-gradient-to-r from-slate-900 to-teal-950 text-white border-slate-800 shadow-sm space-y-4">
+      <Card className="p-4 sm:p-5 bg-gradient-to-r from-slate-900 to-teal-950 text-white border-slate-800 shadow-sm space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="flex h-2.5 w-2.5 relative">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex h-2.5 w-2.5 relative shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
               </span>
@@ -383,11 +383,11 @@ export const EventsManagement: React.FC = () => {
         {events.map((ev) => (
           <Card
             key={ev.id}
-            className="p-5 sm:p-6 bg-white border-slate-200/80 hover:border-slate-300 transition-all space-y-4"
+            className="p-4 sm:p-6 bg-white border-slate-200/80 hover:border-slate-300 transition-all space-y-4"
           >
             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
+              <div className="space-y-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100">
                     {ev.type}
                   </span>
@@ -401,7 +401,7 @@ export const EventsManagement: React.FC = () => {
                   )}
                 </div>
                 <h3 className="text-lg sm:text-xl font-bold text-slate-900">{ev.title}</h3>
-                <p className="text-xs text-slate-600 line-clamp-1">{ev.description}</p>
+                <p className="text-xs text-slate-600 line-clamp-2 sm:line-clamp-1">{ev.description}</p>
               </div>
 
               <div className="text-left sm:text-right shrink-0">
@@ -414,19 +414,19 @@ export const EventsManagement: React.FC = () => {
               </div>
             </div>
 
-            <div className="p-3 bg-slate-50 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-              <div className="flex items-center gap-4">
+            <div className="p-3 bg-slate-50 rounded-2xl flex flex-wrap items-center justify-between gap-2 sm:gap-3 text-xs text-slate-600">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
                 <span className="flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   {ev.location}
                 </span>
                 <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   Check-in: {formatTime12Hour(ev.checkInOpenTime)} – {formatTime12Hour(ev.checkInCloseTime)}
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-slate-800">
                   {ev.attendeesCount || 0} Attended
                 </span>
