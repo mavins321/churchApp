@@ -4,6 +4,8 @@ import { Navbar } from './components/layout/Navbar';
 import { AppSidebar } from './components/layout/AppSidebar';
 import { MobileBottomNav } from './components/layout/MobileBottomNav';
 import { LoginView } from './components/auth/LoginView';
+import { VerificationGateView } from './components/auth/VerificationGateView';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
 // Icons & Utilities
 import { Sparkles, Church, Loader2 } from 'lucide-react';
@@ -43,44 +45,53 @@ const ViewFallback = () => (
 );
 
 const MainApp: React.FC = () => {
-  const { firebaseUser, role, loading, member } = useAuth();
+  const {
+    firebaseUser,
+    role,
+    emailVerified,
+    accountStatus,
+    loginModePreference,
+    loading,
+    member
+  } = useAuth();
   const isAdminRole = role === 'admin' || role === 'super_admin';
+  const isPortalAuthorized = Boolean(firebaseUser && emailVerified && accountStatus === 'active');
 
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [justRegistered, setJustRegistered] = useState(false);
-  const [portalView, setPortalView] = useState<'admin' | 'member'>(() => (isAdminRole ? 'admin' : 'member'));
-  const [currentTab, setCurrentTab] = useState<string>(() => (isAdminRole ? 'admin-dashboard' : 'home'));
+  const [portalView, setPortalView] = useState<'admin' | 'member'>('member');
+  const [currentTab, setCurrentTab] = useState<string>('home');
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isDigitalCardOpen, setIsDigitalCardOpen] = useState(false);
-  const initializedAdminUidRef = React.useRef<string | null>(
-    firebaseUser && isAdminRole ? firebaseUser.uid : null
-  );
+  const initializedUserKeyRef = React.useRef<string | null>(null);
 
-  // Keep portalView & currentTab synchronized with actual user role
+  // Keep portalView & currentTab synchronized with actual verified Firebase role & login choice
   useEffect(() => {
-    if (!firebaseUser) {
-      initializedAdminUidRef.current = null;
+    if (!isPortalAuthorized || !firebaseUser) {
+      initializedUserKeyRef.current = null;
       setPortalView('member');
       setCurrentTab('home');
       return;
     }
 
+    const sessionKey = `${firebaseUser.uid}:${role}:${loginModePreference}`;
     if (isAdminRole) {
-      if (initializedAdminUidRef.current !== firebaseUser.uid) {
-        initializedAdminUidRef.current = firebaseUser.uid;
-        setPortalView('admin');
-        setCurrentTab('admin-dashboard');
+      if (initializedUserKeyRef.current !== sessionKey) {
+        initializedUserKeyRef.current = sessionKey;
+        const targetView = loginModePreference === 'admin' ? 'admin' : 'member';
+        setPortalView(targetView);
+        setCurrentTab(targetView === 'admin' ? 'admin-dashboard' : 'home');
       }
     } else {
-      initializedAdminUidRef.current = null;
+      initializedUserKeyRef.current = sessionKey;
       setPortalView('member');
       if (currentTab.startsWith('admin-')) {
         setCurrentTab('home');
       }
     }
-  }, [firebaseUser?.uid, isAdminRole]);
+  }, [firebaseUser?.uid, isPortalAuthorized, isAdminRole, role, loginModePreference]);
 
   // Extra guard: never allow non-admin users on admin-* routes
   useEffect(() => {
@@ -98,7 +109,7 @@ const MainApp: React.FC = () => {
     }
     if (tab.startsWith('admin-') && isAdminRole) {
       setPortalView('admin');
-    } else if (['home', 'activities', 'attendance', 'notifications', 'profile', 'announcements'].includes(tab)) {
+    } else if (['home', 'activities', 'attendance', 'notifications', 'profile', 'announcements', 'prayers'].includes(tab)) {
       setPortalView('member');
     }
     setCurrentTab(tab);
@@ -114,9 +125,9 @@ const MainApp: React.FC = () => {
     setCurrentTab(view === 'admin' ? 'admin-dashboard' : 'home');
   };
 
-  // Fetch unread notifications count in background
+  // Fetch unread notifications count only when verified and active
   useEffect(() => {
-    if (!firebaseUser?.uid) return;
+    if (!isPortalAuthorized || !firebaseUser?.uid) return;
     const fetchUnread = async () => {
       try {
         const q = query(
@@ -131,7 +142,7 @@ const MainApp: React.FC = () => {
       }
     };
     fetchUnread();
-  }, [firebaseUser?.uid, currentTab]);
+  }, [isPortalAuthorized, firebaseUser?.uid, currentTab]);
 
   if (loading) {
     return (
@@ -142,13 +153,13 @@ const MainApp: React.FC = () => {
         <h2 className="text-lg font-black tracking-tight text-slate-800">FAITHTRACK</h2>
         <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
           <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-          Loading sanctuary portal...
+          Verifying sanctuary session...
         </p>
       </div>
     );
   }
 
-  // Unauthenticated or currently celebrating registration completion
+  // Unauthenticated or currently displaying post-registration summary
   if (!firebaseUser || justRegistered) {
     return (
       <div className="min-h-screen bg-slate-50">
@@ -172,6 +183,11 @@ const MainApp: React.FC = () => {
         )}
       </div>
     );
+  }
+
+  // Enforce Firebase Email Verification and Account Activation before portal entry
+  if (!emailVerified || accountStatus !== 'active') {
+    return <VerificationGateView />;
   }
 
   return (
@@ -277,8 +293,10 @@ const MainApp: React.FC = () => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <MainApp />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <MainApp />
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

@@ -52,7 +52,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({ isOpen
           <div>
             <h4 className="text-base font-bold text-slate-800">Check Your Email</h4>
             <p className="text-xs text-slate-500 mt-1">
-              We sent a password reset link to <strong className="text-slate-700">{email}</strong>. Please check your inbox and spam folder.
+              If an account exists for <strong className="text-slate-700">{email}</strong>, Firebase has sent password reset instructions. Please check your inbox and spam folder.
             </p>
           </div>
           <Button onClick={handleClose} variant="primary" className="w-full">

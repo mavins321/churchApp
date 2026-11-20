@@ -1,0 +1,377 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user account role and activation state stored strictly in Firestore.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID matching document ID." },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["member", "admin", "super_admin"] },
+        "status": { "type": "string", "enum": ["pending", "active", "suspended"] },
+        "memberId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "status", "createdAt", "updatedAt"]
+    },
+    "Member": {
+      "title": "Member",
+      "description": "Church congregation member directory record containing PII isolated by owner or admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "membershipNumber": { "type": "string" },
+        "firstName": { "type": "string" },
+        "middleName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "fullName": { "type": "string" },
+        "gender": { "type": "string", "enum": ["Male", "Female", "Other"] },
+        "dateOfBirth": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "country": { "type": "string" },
+        "departmentId": { "type": "string" },
+        "departmentName": { "type": "string" },
+        "groupId": { "type": "string" },
+        "groupName": { "type": "string" },
+        "membershipDate": { "type": "string" },
+        "occupation": { "type": "string" },
+        "skills": { "type": "array" },
+        "emergencyName": { "type": "string" },
+        "emergencyPhone": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "active", "suspended"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "membershipNumber", "firstName", "lastName", "fullName", "email", "status", "createdAt", "updatedAt"]
+    },
+    "ChurchEvent": {
+      "title": "ChurchEvent",
+      "description": "Scheduled worship service or church activity.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string" },
+        "date": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "location": { "type": "string" },
+        "recurring": { "type": "boolean" },
+        "attendanceEnabled": { "type": "boolean" },
+        "checkInOpenTime": { "type": "string" },
+        "checkInCloseTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["upcoming", "ongoing", "completed", "cancelled"] },
+        "attendeesCount": { "type": "number" },
+        "expectedCount": { "type": "number" },
+        "qrSessionToken": { "type": "string" },
+        "qrSessionExpiresAt": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "type", "date", "startTime", "endTime", "location", "status", "createdAt", "updatedAt"]
+    },
+    "CheckInSession": {
+      "title": "CheckInSession",
+      "description": "Active QR check-in token session for an event.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "token": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "closed"] },
+        "openedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "eventId", "token", "expiresAt", "status", "createdAt"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Verified attendance check-in record for a member at an activity.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "eventTitle": { "type": "string" },
+        "eventDate": { "type": "string" },
+        "userId": { "type": "string" },
+        "memberId": { "type": "string" },
+        "memberName": { "type": "string" },
+        "membershipNumber": { "type": "string" },
+        "departmentName": { "type": "string" },
+        "groupName": { "type": "string" },
+        "checkInTime": { "type": "string" },
+        "checkInTimeFormatted": { "type": "string" },
+        "method": { "type": "string", "enum": ["qr", "manual"] },
+        "status": { "type": "string", "enum": ["present", "absent", "excused"] },
+        "verifiedBy": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "eventId", "eventTitle", "eventDate", "userId", "memberId", "memberName", "checkInTime", "method", "status", "createdAt"]
+    },
+    "Department": {
+      "title": "Department",
+      "description": "Church ministry unit or workforce department.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "leaderName": { "type": "string" },
+        "active": { "type": "boolean" },
+        "memberCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "description", "active", "createdAt"]
+    },
+    "ChurchGroup": {
+      "title": "ChurchGroup",
+      "description": "Cell fellowship or demographic church group.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string" },
+        "leaderName": { "type": "string" },
+        "meetingDay": { "type": "string" },
+        "active": { "type": "boolean" },
+        "memberCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "description", "type", "active", "createdAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Church bulletin or announcement.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "audience": { "type": "string", "enum": ["everyone", "department", "group"] },
+        "targetId": { "type": "string" },
+        "targetName": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "published", "archived"] },
+        "date": { "type": "string" },
+        "authorName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "message", "audience", "status", "date", "authorName", "createdAt"]
+    },
+    "ChurchNotification": {
+      "title": "ChurchNotification",
+      "description": "In-app notification belonging to a specific user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["event", "attendance", "announcement", "system"] },
+        "read": { "type": "boolean" },
+        "link": { "type": "string" },
+        "eventId": { "type": "string" },
+        "emailSent": { "type": "boolean" },
+        "pushSent": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "title", "message", "type", "read", "createdAt"]
+    },
+    "ActivityRegistration": {
+      "title": "ActivityRegistration",
+      "description": "Member RSVP pre-registration for an upcoming church activity.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "eventTitle": { "type": "string" },
+        "eventDate": { "type": "string" },
+        "eventStartTime": { "type": "string" },
+        "eventLocation": { "type": "string" },
+        "memberId": { "type": "string" },
+        "userId": { "type": "string" },
+        "memberName": { "type": "string" },
+        "memberEmail": { "type": "string" },
+        "memberPhone": { "type": "string" },
+        "membershipNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["confirmed", "cancelled"] },
+        "reminderSent": { "type": "boolean" },
+        "registeredAt": { "type": "string" },
+        "cancelledAt": { "type": "string" },
+        "lastReminderAt": { "type": "string" }
+      },
+      "required": ["id", "eventId", "memberId", "userId", "status", "registeredAt"]
+    },
+    "PrayerRequest": {
+      "title": "PrayerRequest",
+      "description": "Congregation Prayer Wall petition with optional pastoral confidentiality.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorMemberNumber": { "type": "string" },
+        "isAnonymous": { "type": "boolean" },
+        "isConfidentialToPastors": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "answered", "archived"] },
+        "testimony": { "type": "string" },
+        "answeredAt": { "type": "string" },
+        "prayCount": { "type": "number" },
+        "prayedUserIds": { "type": "array" },
+        "encouragements": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "description", "category", "authorId", "authorName", "isAnonymous", "isConfidentialToPastors", "status", "prayCount", "prayedUserIds", "createdAt", "updatedAt"]
+    },
+    "ChurchSettings": {
+      "title": "ChurchSettings",
+      "description": "Parish-wide operational settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "churchName": { "type": "string" },
+        "tagline": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "timezone": { "type": "string" },
+        "checkInWindowMinutesBefore": { "type": "number" },
+        "checkInWindowMinutesAfter": { "type": "number" },
+        "qrSessionExpiryMinutes": { "type": "number" },
+        "allowManualCheckIn": { "type": "boolean" },
+        "welcomeMessage": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "churchName", "address", "phone", "email", "timezone"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable admin audit log entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "performedBy": { "type": "string" },
+        "performedByName": { "type": "string" },
+        "performedByRole": { "type": "string" },
+        "targetType": { "type": "string" },
+        "targetId": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "action", "details", "performedBy", "targetType", "targetId", "timestamp"]
+    },
+    "EmailDispatchRecord": {
+      "title": "EmailDispatchRecord",
+      "description": "Email reminder delivery audit record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "recipientEmail": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "eventId": { "type": "string" },
+        "eventTitle": { "type": "string" },
+        "eventDate": { "type": "string" },
+        "subject": { "type": "string" },
+        "snippet": { "type": "string" },
+        "status": { "type": "string" },
+        "dispatchedAt": { "type": "string" }
+      },
+      "required": ["id", "recipientEmail", "eventId", "subject", "status", "dispatchedAt"]
+    },
+    "NotificationAuditLog": {
+      "title": "NotificationAuditLog",
+      "description": "Audit log of reminder engine runs.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "upcomingEventsFound": { "type": "number" },
+        "totalRemindersSent": { "type": "number" },
+        "totalEmailsDispatched": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User RBAC role and account activation records."
+    },
+    "/members/{memberId}": {
+      "schema": { "$ref": "#/entities/Member" },
+      "description": "Member directory records with PII isolated to owner and admins."
+    },
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/ChurchEvent" },
+      "description": "Church services and activities."
+    },
+    "/checkInSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/CheckInSession" },
+      "description": "QR check-in sessions."
+    },
+    "/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/AttendanceRecord" },
+      "description": "Member check-in records scoped by userId."
+    },
+    "/departments/{departmentId}": {
+      "schema": { "$ref": "#/entities/Department" },
+      "description": "Church ministry departments."
+    },
+    "/groups/{groupId}": {
+      "schema": { "$ref": "#/entities/ChurchGroup" },
+      "description": "Fellowship and cell groups."
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Official church notices."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/ChurchNotification" },
+      "description": "User notifications scoped by userId."
+    },
+    "/activity_registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/ActivityRegistration" },
+      "description": "Activity RSVP pre-registrations scoped by userId."
+    },
+    "/prayer_requests/{prayerId}": {
+      "schema": { "$ref": "#/entities/PrayerRequest" },
+      "description": "Prayer Wall petitions with confidentiality enforcement."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/ChurchSettings" },
+      "description": "Church configuration documents."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable admin audit logs."
+    },
+    "/email_dispatches/{dispatchId}": {
+      "schema": { "$ref": "#/entities/EmailDispatchRecord" },
+      "description": "Automated reminder email receipts."
+    },
+    "/notification_audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/NotificationAuditLog" },
+      "description": "Automated reminder engine execution logs."
+    }
+  }
+}

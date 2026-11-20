@@ -3,7 +3,6 @@ import path from 'path';
 import dotenv from 'dotenv';
 import compression from 'compression';
 import { apiRouter } from './src/server/api';
-import { startBackgroundNotifier, stopBackgroundNotifier } from './src/server/backgroundNotifier';
 
 dotenv.config();
 
@@ -47,8 +46,6 @@ async function start() {
 
   const server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`FAITHTRACK full-stack server running on port ${PORT}`);
-    // Start the recurring background notifier for upcoming activities
-    startBackgroundNotifier(5);
   });
 
   // Handle address in use gracefully without unhandled crashes
@@ -68,14 +65,12 @@ async function start() {
 
   process.on('SIGTERM', () => {
     try {
-      stopBackgroundNotifier();
       server.close();
     } catch {}
   });
 
   process.on('SIGINT', () => {
     try {
-      stopBackgroundNotifier();
       server.close();
     } catch {}
   });

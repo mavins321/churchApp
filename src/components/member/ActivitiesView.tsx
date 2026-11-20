@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, query, getDocs, where, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, getDocs, where, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { ChurchEvent, AttendanceRecord, EventType } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card } from '../ui/Card';
@@ -36,7 +36,7 @@ import { ActivitiesViewSkeleton } from '../ui/Skeleton';
 import { staleWhileRevalidate, invalidateCache } from '../../lib/cache';
 
 export const ActivitiesView: React.FC = () => {
-  const { member, role } = useAuth();
+  const { firebaseUser, member, role } = useAuth();
   const isAdminRole = role === 'admin' || role === 'super_admin';
 
   const [events, setEvents] = useState<ChurchEvent[]>([]);
@@ -77,14 +77,14 @@ export const ActivitiesView: React.FC = () => {
 
   const fetchEventsAndAttendance = async () => {
     try {
-      const cacheKey = `activities_view_${member?.id || 'guest'}`;
+      const cacheKey = `activities_view_${firebaseUser?.uid || member?.id || 'guest'}`;
       await staleWhileRevalidate(cacheKey, async () => {
         const evPromise = getDocs(query(collection(db, 'events')));
-        const attPromise = member?.id
-          ? getDocs(query(collection(db, 'attendance'), where('memberId', '==', member.id)))
+        const attPromise = firebaseUser?.uid
+          ? getDocs(query(collection(db, 'attendance'), where('userId', '==', firebaseUser.uid)))
           : Promise.resolve({ docs: [] } as any);
-        const regPromise = member?.id
-          ? getDocs(query(collection(db, 'activity_registrations'), where('memberId', '==', member.id), where('status', '==', 'confirmed')))
+        const regPromise = firebaseUser?.uid
+          ? getDocs(query(collection(db, 'activity_registrations'), where('userId', '==', firebaseUser.uid), where('status', '==', 'confirmed')))
           : Promise.resolve({ docs: [] } as any);
 
         const [evSnap, attSnap, regSnap] = await Promise.all([
@@ -121,20 +121,20 @@ export const ActivitiesView: React.FC = () => {
 
   useEffect(() => {
     fetchEventsAndAttendance();
-  }, [member?.id]);
+  }, [firebaseUser?.uid, member?.id]);
 
   const handleToggleRegistration = async (event: ChurchEvent, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!member) return;
+    if (!member || !firebaseUser?.uid) return;
     const isRegistered = !!registrations[event.id];
+    const regId = `reg_${event.id}_${member.id}`;
     setRegisteringEventId(event.id);
 
     try {
       if (isRegistered) {
-        await fetch('/api/activities/unregister', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ eventId: event.id, memberId: member.id })
+        await updateDoc(doc(db, 'activity_registrations', regId), {
+          status: 'cancelled',
+          cancelledAt: new Date().toISOString()
         });
         setRegistrations(prev => {
           const copy = { ...prev };
@@ -143,18 +143,23 @@ export const ActivitiesView: React.FC = () => {
         });
         setFeedbackMessage(`Registration cancelled for "${event.title}".`);
       } else {
-        await fetch('/api/activities/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            eventId: event.id,
-            memberId: member.id,
-            userId: member.userId || member.id,
-            memberName: member.fullName,
-            memberEmail: member.email,
-            memberPhone: member.phone
-          })
-        });
+        const registration = {
+          id: regId,
+          eventId: event.id,
+          eventTitle: event.title,
+          eventDate: event.date,
+          eventStartTime: event.startTime,
+          eventLocation: event.location,
+          memberId: member.id,
+          userId: firebaseUser.uid,
+          memberName: member.fullName || 'Church Member',
+          memberEmail: member.email || firebaseUser.email || '',
+          memberPhone: member.phone || '',
+          status: 'confirmed',
+          reminderSent: false,
+          registeredAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'activity_registrations', regId), registration);
         setRegistrations(prev => ({ ...prev, [event.id]: true }));
         setFeedbackMessage(`Registered for "${event.title}"! Automated email & push reminder scheduled.`);
 
@@ -162,6 +167,7 @@ export const ActivitiesView: React.FC = () => {
           Notification.requestPermission();
         }
       }
+      invalidateCache('activities_view_');
       setTimeout(() => setFeedbackMessage(''), 5000);
     } catch (err) {
       console.error('Registration toggle error:', err);

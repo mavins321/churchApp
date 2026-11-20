@@ -25,7 +25,7 @@ interface AttendanceViewProps {
 }
 
 export const AttendanceView: React.FC<AttendanceViewProps> = ({ onSelectTab }) => {
-  const { member } = useAuth();
+  const { member, firebaseUser } = useAuth();
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [events, setEvents] = useState<ChurchEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,11 +34,11 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({ onSelectTab }) =
 
   useEffect(() => {
     const fetchAttendanceData = async () => {
-      if (!member?.id) return;
+      if (!firebaseUser?.uid) return;
       try {
-        const cacheKey = `attendance_view_${member.id}`;
+        const cacheKey = `attendance_view_${firebaseUser.uid}`;
         await staleWhileRevalidate(cacheKey, async () => {
-          const attPromise = getDocs(query(collection(db, 'attendance'), where('memberId', '==', member.id)));
+          const attPromise = getDocs(query(collection(db, 'attendance'), where('userId', '==', firebaseUser.uid)));
           const evPromise = getDocs(collection(db, 'events'));
 
           const [attSnap, evSnap] = await Promise.all([attPromise, evPromise]);
@@ -62,7 +62,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({ onSelectTab }) =
     };
 
     fetchAttendanceData();
-  }, [member?.id]);
+  }, [firebaseUser?.uid]);
 
   // Activity breakdown counts
   const sundayCount = attendance.filter(a => a.eventTitle.toLowerCase().includes('sunday')).length;

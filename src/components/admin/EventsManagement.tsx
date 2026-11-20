@@ -9,6 +9,7 @@ import {
   deleteDoc 
 } from 'firebase/firestore';
 import { ChurchEvent, EventType } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -36,6 +37,7 @@ import { formatDateReadable, formatTime12Hour } from '../../lib/utils';
 import { EventsManagementSkeleton } from '../ui/Skeleton';
 
 export const EventsManagement: React.FC = () => {
+  const { firebaseUser } = useAuth();
   const [events, setEvents] = useState<ChurchEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -72,7 +74,10 @@ export const EventsManagement: React.FC = () => {
 
   const fetchNotifierStatus = async () => {
     try {
-      const res = await fetch('/api/notifications/status');
+      const idToken = firebaseUser ? await firebaseUser.getIdToken() : '';
+      const res = await fetch('/api/notifications/status', {
+        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {}
+      });
       if (res.ok) {
         const data = await res.json();
         setNotifierStatus(data);
@@ -86,13 +91,17 @@ export const EventsManagement: React.FC = () => {
   const handleRunCheckNow = async () => {
     setCheckingReminders(true);
     try {
-      const res = await fetch('/api/notifications/run-check', { method: 'POST' });
+      const idToken = firebaseUser ? await firebaseUser.getIdToken() : '';
+      const res = await fetch('/api/notifications/run-check', {
+        method: 'POST',
+        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {}
+      });
       const data = await res.json();
-      if (data.success && data.result) {
+      if (res.ok && data.success && data.result) {
         setFeedbackMessage(data.result.message || 'Background check completed successfully.');
         fetchNotifierStatus();
       } else {
-        setFeedbackMessage('Background check completed.');
+        setFeedbackMessage(data.error || 'Background check could not be completed.');
       }
       setTimeout(() => setFeedbackMessage(''), 5000);
     } catch (err) {

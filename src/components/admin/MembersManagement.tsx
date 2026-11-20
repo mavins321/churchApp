@@ -2,15 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
 import { 
   collection, 
-  query, 
   getDocs, 
   doc, 
   updateDoc, 
   setDoc,
-  deleteDoc 
+  writeBatch
 } from 'firebase/firestore';
-import { Member, UserRole } from '../../types';
-import { useAuth, isEmailAdmin } from '../../contexts/AuthContext';
+import { Member, UserRole, AccountStatus } from '../../types';
+import { useAuth } from '../../contexts/AuthContext';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -76,7 +75,7 @@ export const MembersManagement: React.FC = () => {
     dateOfBirth: '1992-04-12',
     emergencyName: 'Emergency Contact',
     emergencyPhone: '+234 800 000 0000',
-    status: 'active' as 'active' | 'suspended'
+    status: 'active' as AccountStatus
   });
 
   // Pagination
@@ -96,8 +95,7 @@ export const MembersManagement: React.FC = () => {
       const rolesMap: Record<string, UserRole> = {};
       usersSnap.docs.forEach(d => {
         const data = d.data();
-        const email = data.email || '';
-        rolesMap[d.id] = isEmailAdmin(email) ? 'admin' : ((data.role as UserRole) || 'member');
+        rolesMap[d.id] = (data.role as UserRole) || 'member';
       });
       setUserRoles(rolesMap);
     } catch (err) {
@@ -162,9 +160,15 @@ export const MembersManagement: React.FC = () => {
   };
 
   const handleToggleStatus = async (m: Member) => {
-    const nextStatus = m.status === 'active' ? 'suspended' : 'active';
+    const nextStatus: AccountStatus = m.status === 'active' ? 'suspended' : 'active';
+    const now = new Date().toISOString();
     try {
-      await updateDoc(doc(db, 'members', m.id), { status: nextStatus, updatedAt: new Date().toISOString() });
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'members', m.id), { status: nextStatus, updatedAt: now });
+      if (m.userId && userRoles[m.userId]) {
+        batch.update(doc(db, 'users', m.userId), { status: nextStatus, updatedAt: now });
+      }
+      await batch.commit();
       setMembers(prev => prev.map(item => item.id === m.id ? { ...item, status: nextStatus } : item));
       showFeedback(
         'success',
@@ -179,7 +183,6 @@ export const MembersManagement: React.FC = () => {
   };
 
   const getMemberPortalRole = (m: Member): UserRole | null => {
-    if (isEmailAdmin(m.email)) return 'admin';
     if (m.userId && userRoles[m.userId]) return userRoles[m.userId];
     return null;
   };
@@ -194,8 +197,8 @@ export const MembersManagement: React.FC = () => {
       return;
     }
 
-    if (isEmailAdmin(target.email) && nextRole === 'member') {
-      showFeedback('error', 'The primary church administrator account cannot be demoted.');
+    if (userRoles[target.userId] === 'super_admin' && nextRole === 'member') {
+      showFeedback('error', 'Super Administrator accounts cannot be demoted here.');
       setRoleConfirmTarget(null);
       return;
     }
@@ -372,6 +375,7 @@ export const MembersManagement: React.FC = () => {
             className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
           >
             <option value="all">All Statuses</option>
+            <option value="pending">Pending Approval</option>
             <option value="active">Active Members</option>
             <option value="suspended">Suspended Members</option>
           </select>
@@ -396,7 +400,7 @@ export const MembersManagement: React.FC = () => {
             {paginatedMembers.map((m) => {
               const portalRole = getMemberPortalRole(m);
               const isMemberAdmin = portalRole === 'admin' || portalRole === 'super_admin';
-              const isProtectedAdmin = isEmailAdmin(m.email) || m.userId === firebaseUser?.uid;
+              const isProtectedAdmin = portalRole === 'super_admin' || m.userId === firebaseUser?.uid;
               return (
               <tr key={m.id} className="hover:bg-slate-50/70 transition-colors">
                 <td className="px-5 py-3.5">
@@ -424,8 +428,8 @@ export const MembersManagement: React.FC = () => {
                   )}
                 </td>
                 <td className="px-4 py-3.5">
-                  <Badge variant={m.status === 'active' ? 'success' : 'danger'} size="sm">
-                    {m.status === 'active' ? 'Active' : 'Suspended'}
+                  <Badge variant={m.status === 'active' ? 'success' : m.status === 'pending' ? 'warning' : 'danger'} size="sm">
+                    {m.status === 'active' ? 'Active' : m.status === 'pending' ? 'Pending' : 'Suspended'}
                   </Badge>
                 </td>
                 <td className="px-4 py-3.5 text-slate-500">
@@ -496,7 +500,7 @@ export const MembersManagement: React.FC = () => {
         {paginatedMembers.map((m) => {
           const portalRole = getMemberPortalRole(m);
           const isMemberAdmin = portalRole === 'admin' || portalRole === 'super_admin';
-          const isProtectedAdmin = isEmailAdmin(m.email) || m.userId === firebaseUser?.uid;
+          const isProtectedAdmin = portalRole === 'super_admin' || m.userId === firebaseUser?.uid;
           return (
           <Card key={m.id} className="p-4 bg-white border-slate-200/80 space-y-3">
             <div className="flex items-center justify-between gap-2">
@@ -508,8 +512,8 @@ export const MembersManagement: React.FC = () => {
                 </div>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
-                <Badge variant={m.status === 'active' ? 'success' : 'danger'} size="sm">
-                  {m.status === 'active' ? 'Active' : 'Suspended'}
+                <Badge variant={m.status === 'active' ? 'success' : m.status === 'pending' ? 'warning' : 'danger'} size="sm">
+                  {m.status === 'active' ? 'Active' : m.status === 'pending' ? 'Pending' : 'Suspended'}
                 </Badge>
                 {portalRole && (
                   <Badge variant={isMemberAdmin ? 'info' : 'neutral'} size="sm">
@@ -707,8 +711,8 @@ export const MembersManagement: React.FC = () => {
                 <h3 className="text-lg font-bold text-slate-900">{activeMember.fullName}</h3>
                 <p className="text-xs font-mono font-bold text-emerald-700">{activeMember.membershipNumber}</p>
                 <div className="flex items-center gap-1.5 mt-1">
-                  <Badge variant={activeMember.status === 'active' ? 'success' : 'danger'} size="sm">
-                    {activeMember.status === 'active' ? 'Active' : 'Suspended'}
+                  <Badge variant={activeMember.status === 'active' ? 'success' : activeMember.status === 'pending' ? 'warning' : 'danger'} size="sm">
+                    {activeMember.status === 'active' ? 'Active' : activeMember.status === 'pending' ? 'Pending' : 'Suspended'}
                   </Badge>
                   {getMemberPortalRole(activeMember) && (
                     <Badge
@@ -739,7 +743,7 @@ export const MembersManagement: React.FC = () => {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-2 pt-2">
-              {getMemberPortalRole(activeMember) && !isEmailAdmin(activeMember.email) && activeMember.userId !== firebaseUser?.uid && (
+              {getMemberPortalRole(activeMember) && getMemberPortalRole(activeMember) !== 'super_admin' && activeMember.userId !== firebaseUser?.uid && (
                 <Button
                   type="button"
                   variant="outline"

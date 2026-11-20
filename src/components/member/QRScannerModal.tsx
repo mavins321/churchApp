@@ -14,8 +14,9 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ChurchEvent } from '../../types';
-import { collection, query, where, getDocs, doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { isCheckInWindowActive, formatTime12Hour } from '../../lib/utils';
 
 interface QRScannerModalProps {
   isOpen: boolean;
@@ -50,84 +51,75 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   }, [isOpen, activeEvent]);
 
   const handleVerify = async (tokenToUse?: string) => {
-    const token = tokenToUse || tokenInput.trim();
+    const token = (tokenToUse || tokenInput).trim();
     if (!firebaseUser?.uid) return;
 
     setLoading(true);
     setResultMessage('');
 
-    // 1. First attempt: Full-Stack API verification
-    let apiSuccess = false;
     try {
-      const res = await fetch('/api/check-in/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: firebaseUser.uid,
-          qrToken: token || undefined,
-          eventId: activeEvent?.id || undefined
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        apiSuccess = true;
-        if (data.alreadyCheckedIn) {
-          setResultState('duplicate');
-          setResultMessage("You're already checked in.");
-          setCheckInTime(data.checkInTime || 'Earlier today');
-          setEventTitle(data.record?.eventTitle || activeEvent?.title || 'Church Service');
-        } else {
-          setResultState('success');
-          setResultMessage('Check-in successful!');
-          setCheckInTime(data.checkInTime || new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
-          setEventTitle(data.record?.eventTitle || activeEvent?.title || 'Church Service');
-          confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { y: 0.6 }
-          });
-          onCheckInSuccess();
-        }
-        setLoading(false);
-        return;
-      } else if (res.status === 400 || res.status === 403 || res.status === 404) {
-        // Business logic error from API (e.g. invalid QR token, cancelled event)
-        const data = await res.json().catch(() => ({}));
+      if (member?.status === 'suspended') {
         setResultState('error');
-        setResultMessage(data.error || 'Check-in could not be completed.');
+        setResultMessage('Your membership is currently suspended. Please contact the church office.');
         setLoading(false);
         return;
       }
-    } catch (networkErr) {
-      console.warn('API endpoint unreachable, activating direct database attendance sync:', networkErr);
-    }
 
-    // 2. Direct Firestore fallback (ensures clock-in always succeeds)
-    try {
-      let targetEvent: any = activeEvent;
-      if (!targetEvent && token) {
+      let targetEvent: ChurchEvent | null = activeEvent || null;
+
+      if (token) {
         const evSnap = await getDocs(query(collection(db, 'events'), where('qrSessionToken', '==', token)));
         if (!evSnap.empty) {
-          targetEvent = { id: evSnap.docs[0].id, ...evSnap.docs[0].data() };
-        }
-      }
-      if (!targetEvent) {
-        const allEvSnap = await getDocs(query(collection(db, 'events')));
-        if (!allEvSnap.empty) {
-          const list = allEvSnap.docs.map(d => ({ ...d.data(), id: d.id } as ChurchEvent));
-          targetEvent = list.find(e => e.status === 'ongoing') || list.find(e => e.status === 'upcoming') || list[0];
+          targetEvent = { id: evSnap.docs[0].id, ...evSnap.docs[0].data() } as ChurchEvent;
+        } else {
+          const sessionSnap = await getDocs(query(collection(db, 'checkInSessions'), where('token', '==', token)));
+          if (!sessionSnap.empty) {
+            const session = sessionSnap.docs[0].data();
+            if (session.status !== 'active') {
+              setResultState('error');
+              setResultMessage('This QR check-in session has expired or is closed.');
+              setLoading(false);
+              return;
+            }
+            if (session.expiresAt && new Date(session.expiresAt).getTime() < Date.now()) {
+              setResultState('error');
+              setResultMessage('This QR check-in code has expired.');
+              setLoading(false);
+              return;
+            }
+            const evDoc = await getDoc(doc(db, 'events', session.eventId));
+            if (evDoc.exists()) {
+              targetEvent = { id: evDoc.id, ...evDoc.data() } as ChurchEvent;
+            }
+          }
         }
       }
 
       if (!targetEvent) {
         setResultState('error');
-        setResultMessage('No active church service or event found to check in to.');
+        setResultMessage('Invalid QR token or church activity not found.');
         setLoading(false);
         return;
       }
 
-      // Check duplicate in Firestore
+      if (targetEvent.status === 'cancelled') {
+        setResultState('error');
+        setResultMessage('This church activity has been cancelled.');
+        setLoading(false);
+        return;
+      }
+
+      const windowCheck = isCheckInWindowActive(targetEvent);
+      if (!windowCheck.isOpen) {
+        setResultState('error');
+        setResultMessage(windowCheck.message);
+        setLoading(false);
+        return;
+      }
+
+      const memberId = member?.id || `mem_${firebaseUser.uid.substring(0, 10)}`;
+
+      // Check duplicate attendance by userId + eventId
       const dupQuery = query(
         collection(db, 'attendance'),
         where('userId', '==', firebaseUser.uid),
@@ -139,42 +131,59 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
         const existingData = dupSnap.docs[0].data();
         setResultState('duplicate');
         setResultMessage("You're already checked in.");
-        setCheckInTime(existingData.checkInTime ? new Date(existingData.checkInTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'Earlier today');
+        setCheckInTime(
+          existingData.checkInTimeFormatted ||
+            (existingData.checkInTime ? formatTime12Hour(existingData.checkInTime) : 'Earlier today')
+        );
         setEventTitle(targetEvent.title || 'Church Service');
         setLoading(false);
         return;
       }
 
-      // Record attendance directly
-      const attendanceId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const now = new Date();
+      const attendanceId = `att_${targetEvent.id}_${memberId}`;
+      const formattedTime = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+
       const attendanceRecord = {
         id: attendanceId,
         eventId: targetEvent.id,
         eventTitle: targetEvent.title,
+        eventDate: targetEvent.date,
         userId: firebaseUser.uid,
-        memberId: member?.id || `mem_${firebaseUser.uid.substring(0, 10)}`,
-        memberName: member?.fullName || (firebaseUser as any).displayName || 'Church Member',
+        memberId,
+        memberName: member?.fullName || firebaseUser.displayName || 'Church Member',
         membershipNumber: member?.membershipNumber || 'FT-2026-ACTIVE',
         departmentName: member?.departmentName || 'General Congregation',
+        groupName: member?.groupName || '',
         checkInTime: now.toISOString(),
-        checkInType: token ? 'qr_scan' : 'self_service',
-        status: 'verified',
+        checkInTimeFormatted: formattedTime,
+        method: token ? 'qr' : 'manual',
+        status: 'present',
+        verifiedBy: 'system_qr',
+        notes: '',
         createdAt: now.toISOString()
       };
 
       await setDoc(doc(db, 'attendance', attendanceId), attendanceRecord);
+
       try {
-        await updateDoc(doc(db, 'events', targetEvent.id), {
-          currentAttendance: increment(1)
+        const notifId = `notif_att_${targetEvent.id}_${firebaseUser.uid}`;
+        await setDoc(doc(db, 'notifications', notifId), {
+          id: notifId,
+          userId: firebaseUser.uid,
+          title: 'Attendance Confirmed',
+          message: `Your attendance for "${targetEvent.title}" was recorded at ${formattedTime}.`,
+          type: 'attendance',
+          read: false,
+          createdAt: now.toISOString()
         });
       } catch {
-        // quiet counter catch
+        // non-fatal notification write
       }
 
       setResultState('success');
       setResultMessage('Check-in successful!');
-      setCheckInTime(now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+      setCheckInTime(formattedTime);
       setEventTitle(targetEvent.title);
       confetti({
         particleCount: 100,
@@ -183,7 +192,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       });
       onCheckInSuccess();
     } catch (fbErr: any) {
-      console.error('Attendance direct sync error:', fbErr);
+      console.error('Attendance check-in error:', fbErr);
       setResultState('error');
       setResultMessage(fbErr.message || 'Unable to complete check-in. Please try again.');
     } finally {

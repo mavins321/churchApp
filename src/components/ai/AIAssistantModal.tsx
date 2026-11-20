@@ -60,11 +60,14 @@ export const AIAssistantModal: React.FC<AIAssistantModalProps> = ({
     setLoading(true);
 
     try {
+      const idToken = firebaseUser ? await firebaseUser.getIdToken() : '';
       const res = await fetch('/api/ai/assistant', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
+        },
         body: JSON.stringify({
-          userId: firebaseUser?.uid,
           prompt: queryText,
           chatHistory: newMessages.slice(1, -1)
         })

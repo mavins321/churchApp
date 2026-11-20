@@ -109,11 +109,12 @@ export const AttendanceManagement: React.FC = () => {
       const attendanceId = `att_${currentEvent.id}_${m.id}`;
       const formattedTime = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 
-      const newRecord: AttendanceRecord = {
+      const newRecord: AttendanceRecord & { userId?: string } = {
         id: attendanceId,
         eventId: currentEvent.id,
         eventTitle: currentEvent.title,
         eventDate: currentEvent.date,
+        userId: m.userId || '',
         memberId: m.id,
         memberName: m.fullName,
         membershipNumber: m.membershipNumber,

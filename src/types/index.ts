@@ -1,9 +1,11 @@
 export type UserRole = 'member' | 'admin' | 'super_admin';
+export type AccountStatus = 'pending' | 'active' | 'suspended';
 
 export interface UserProfile {
   uid: string;
   email: string;
   role: UserRole;
+  status?: AccountStatus;
   memberId?: string;
   displayName?: string;
   photoURL?: string;
@@ -37,7 +39,7 @@ export interface Member {
   skills?: string[];
   emergencyName: string;
   emergencyPhone: string;
-  status: 'active' | 'suspended';
+  status: AccountStatus;
   createdAt: string;
   updatedAt: string;
 }

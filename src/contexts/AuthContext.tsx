@@ -1,257 +1,240 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { 
+import {
   User as FirebaseUser,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as fbSignOut,
   sendPasswordResetEmail,
-  updateProfile
+  sendEmailVerification,
+  updateProfile,
+  reload
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, writeBatch, runTransaction } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  getDocFromServer,
+  setDoc,
+  updateDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  runTransaction
+} from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
-import { UserProfile, Member, UserRole } from '../types';
+import { UserProfile, Member, UserRole, AccountStatus } from '../types';
 import { generateMembershipNumber } from '../lib/utils';
 import { seedDatabaseIfEmpty, INITIAL_DEPARTMENTS, INITIAL_GROUPS } from '../lib/seedData';
+import { handleFirestoreError, OperationType, testFirestoreConnection } from '../lib/errorHandling';
+
+export type PortalLoginMode = 'member' | 'admin';
+
+interface SignInResult {
+  role: UserRole;
+  emailVerified: boolean;
+  accountStatus: AccountStatus;
+}
 
 interface AuthContextType {
-  firebaseUser: FirebaseUser | { uid: string; email: string | null; displayName: string | null } | null;
+  firebaseUser: FirebaseUser | null;
   userProfile: UserProfile | null;
   member: Member | null;
   role: UserRole;
+  emailVerified: boolean;
+  accountStatus: AccountStatus;
+  loginModePreference: PortalLoginMode;
+  setLoginModePreference: (mode: PortalLoginMode) => void;
   loading: boolean;
-  signIn: (email: string, pass: string) => Promise<void>;
+  signIn: (email: string, pass: string, portalMode?: PortalLoginMode) => Promise<SignInResult>;
   signUp: (data: any, onProgress?: (stage: string) => void) => Promise<Member>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  resendVerificationEmail: () => Promise<void>;
+  refreshAuthState: () => Promise<SignInResult>;
   updateMemberProfile: (updates: Partial<Member>) => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const LOCAL_STORAGE_KEY = 'faithtrack_session_uid';
-const CACHE_PROFILE_KEY = 'faithtrack_cache_profile';
-const CACHE_MEMBER_KEY = 'faithtrack_cache_member';
-const CACHE_ROLE_KEY = 'faithtrack_cache_role';
-
-// Helper to check if email is granted church administrator privileges
-export const isEmailAdmin = (email?: string): boolean => {
-  if (!email) return false;
-  const clean = email.toLowerCase().trim();
-  return clean === 'mavinsmayer@gmail.com';
+const normalizeRole = (rawRole: unknown): UserRole => {
+  if (rawRole === 'super_admin') return 'super_admin';
+  if (rawRole === 'admin') return 'admin';
+  return 'member';
 };
 
-// Instant hydration from local cache so the portal opens in <0.1s
-const getInitialSession = () => {
-  try {
-    const uid = localStorage.getItem(LOCAL_STORAGE_KEY);
-    const profileStr = localStorage.getItem(CACHE_PROFILE_KEY);
-    const memberStr = localStorage.getItem(CACHE_MEMBER_KEY);
-    const roleStr = localStorage.getItem(CACHE_ROLE_KEY);
-
-    if (uid && profileStr) {
-      const profile = JSON.parse(profileStr);
-      const memberData = memberStr ? JSON.parse(memberStr) : null;
-      const resolvedRole: UserRole = isEmailAdmin(profile.email)
-        ? 'admin'
-        : (profile.role || (roleStr as UserRole) || 'member');
-
-      return {
-        user: { uid, email: profile.email, displayName: profile.displayName },
-        profile: { ...profile, role: resolvedRole },
-        member: memberData,
-        role: resolvedRole,
-        loading: false,
-      };
-    }
-  } catch {}
-
-  // If no cached session, set loading: false immediately so login screen displays in 0ms!
-  return {
-    user: null,
-    profile: null,
-    member: null,
-    role: 'member' as UserRole,
-    loading: false,
-  };
+const resolveAccountStatus = (
+  userStatus?: unknown,
+  memberStatus?: unknown
+): AccountStatus => {
+  if (userStatus === 'suspended' || memberStatus === 'suspended') return 'suspended';
+  if (userStatus === 'pending' || memberStatus === 'pending') return 'pending';
+  return 'active';
 };
-
-const cacheSession = (profile: UserProfile | null, memberData: Member | null, userRole: UserRole) => {
-  try {
-    if (profile) localStorage.setItem(CACHE_PROFILE_KEY, JSON.stringify(profile));
-    if (memberData) localStorage.setItem(CACHE_MEMBER_KEY, JSON.stringify(memberData));
-    localStorage.setItem(CACHE_ROLE_KEY, userRole);
-  } catch {}
-};
-
-// Helper for secure SHA-256 password hashing
-async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const initialSession = getInitialSession();
-  const [firebaseUser, setFirebaseUser] = useState<any | null>(initialSession.user);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(initialSession.profile);
-  const [member, setMember] = useState<Member | null>(initialSession.member);
-  const [role, setRole] = useState<UserRole>(initialSession.role);
-  const [loading, setLoading] = useState(initialSession.loading);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [member, setMember] = useState<Member | null>(null);
+  const [role, setRole] = useState<UserRole>('member');
+  const [emailVerified, setEmailVerified] = useState<boolean>(false);
+  const [accountStatus, setAccountStatus] = useState<AccountStatus>('active');
+  const [loginModePreference, setLoginModePreference] = useState<PortalLoginMode>('member');
+  const [loading, setLoading] = useState<boolean>(true);
 
-  // Defer database seeding to background idle time so it never slows down page load
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (localStorage.getItem('faithtrack_seeded_v1') !== 'true') {
-        seedDatabaseIfEmpty().then((seeded) => {
-          if (seeded) localStorage.setItem('faithtrack_seeded_v1', 'true');
-        }).catch(() => {});
-      }
-    }, 2500);
-    return () => clearTimeout(timer);
+    testFirestoreConnection();
   }, []);
 
-  // Fetch user profile and member document by UID with parallelized Firestore queries
-  const fetchUserDataByUid = async (uid: string, fallbackEmail: string = '', fallbackName: string = '') => {
+  // Fetch user profile, verified role, and member record strictly from Firebase/Firestore
+  const fetchUserDataByUid = async (
+    user: FirebaseUser
+  ): Promise<{ role: UserRole; accountStatus: AccountStatus; profile: UserProfile | null; memberData: Member | null }> => {
+    const uid = user.uid;
+    const fallbackEmail = (user.email || '').toLowerCase().trim();
+    const fallbackName = user.displayName || 'Church Member';
+
+    const userRef = doc(db, 'users', uid);
+    const memberQuery = query(collection(db, 'members'), where('userId', '==', uid));
+
+    let userSnap;
     try {
-      const userRef = doc(db, 'users', uid);
-      const memberQuery = query(collection(db, 'members'), where('userId', '==', uid));
+      userSnap = await getDocFromServer(userRef);
+    } catch {
+      userSnap = await getDoc(userRef);
+    }
 
-      // Fetch both user doc and member doc simultaneously in parallel
-      const [userSnap, memberSnap] = await Promise.all([
-        getDoc(userRef),
-        getDocs(memberQuery)
-      ]);
+    let memberSnap;
+    try {
+      memberSnap = await getDocs(memberQuery);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, 'members');
+    }
 
-      let currentRole: UserRole = isEmailAdmin(fallbackEmail) ? 'admin' : 'member';
-      let activeProfile: UserProfile | null = null;
+    let verifiedRole: UserRole = 'member';
+    let activeProfile: UserProfile | null = null;
 
-      if (userSnap.exists()) {
-        const uData = userSnap.data() as UserProfile;
-        currentRole = isEmailAdmin(uData.email || fallbackEmail) ? 'admin' : (uData.role || 'member');
-        activeProfile = { ...uData, role: currentRole };
-        setUserProfile(activeProfile);
-        setRole(currentRole);
-      } else {
-        const defaultRole: UserRole = isEmailAdmin(fallbackEmail) ? 'admin' : 'member';
-        const newProfile: UserProfile = {
-          uid: uid,
-          email: fallbackEmail,
-          role: defaultRole,
-          displayName: fallbackName || (defaultRole === 'admin' ? 'Church Administrator' : 'Church Member'),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
+    if (userSnap.exists()) {
+      const uData = userSnap.data() as UserProfile;
+      verifiedRole = normalizeRole(uData.role);
+      activeProfile = { ...uData, role: verifiedRole };
+    } else {
+      // Any user missing a Firestore role record always defaults strictly to 'member' and 'pending'
+      const now = new Date().toISOString();
+      const newProfile: UserProfile = {
+        uid,
+        email: fallbackEmail,
+        role: 'member',
+        status: 'pending',
+        displayName: fallbackName,
+        createdAt: now,
+        updatedAt: now
+      };
+      try {
         await setDoc(userRef, newProfile);
-        activeProfile = newProfile;
-        setUserProfile(newProfile);
-        currentRole = defaultRole;
-        setRole(defaultRole);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `users/${uid}`);
       }
+      activeProfile = newProfile;
+      verifiedRole = 'member';
+    }
 
-      let activeMember: Member | null = null;
-      if (!memberSnap.empty) {
-        const mData = { id: memberSnap.docs[0].id, ...memberSnap.docs[0].data() } as Member;
-        activeMember = mData;
-        setMember(mData);
-      } else {
-        const nameParts = (fallbackName || 'Church Member').split(' ');
-        const firstName = nameParts[0] || 'Church';
-        const lastName = nameParts.slice(1).join(' ') || 'Member';
-        const memberId = `mem_${uid.substring(0, 8)}`;
-        const memNum = generateMembershipNumber();
+    let activeMember: Member | null = null;
+    if (memberSnap && !memberSnap.empty) {
+      activeMember = { id: memberSnap.docs[0].id, ...memberSnap.docs[0].data() } as Member;
+    } else {
+      const now = new Date().toISOString();
+      const nameParts = fallbackName.split(' ');
+      const firstName = nameParts[0] || 'Church';
+      const lastName = nameParts.slice(1).join(' ') || 'Member';
+      const memberId = `mem_${uid.substring(0, 10)}`;
+      const defaultStatus: AccountStatus = activeProfile?.status || 'pending';
 
-        const defaultMember: Member = {
-          id: memberId,
-          userId: uid,
-          membershipNumber: memNum,
-          firstName,
-          lastName,
-          fullName: `${firstName} ${lastName}`.trim(),
-          gender: 'Other',
-          dateOfBirth: '1995-01-01',
-          phone: '+234 800 000 0000',
-          email: fallbackEmail,
-          address: 'FaithTrack Cathedral Area',
-          city: 'Lagos',
-          state: 'Lagos',
-          country: 'Nigeria',
-          departmentName: 'Choir & Worship',
-          groupName: 'Grace Cell Fellowship',
-          membershipDate: new Date().toISOString().split('T')[0],
-          emergencyName: 'Family Contact',
-          emergencyPhone: '+234 800 000 0001',
-          status: 'active',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
+      const defaultMember: Member = {
+        id: memberId,
+        userId: uid,
+        membershipNumber: generateMembershipNumber(),
+        firstName,
+        lastName,
+        fullName: `${firstName} ${lastName}`.trim(),
+        gender: 'Other',
+        dateOfBirth: '1995-01-01',
+        phone: '+234 800 000 0000',
+        email: fallbackEmail,
+        address: 'FaithTrack Cathedral Area',
+        city: 'Lagos',
+        state: 'Lagos',
+        country: 'Nigeria',
+        departmentName: 'Choir & Worship',
+        groupName: 'Grace Cell Fellowship',
+        membershipDate: now.split('T')[0],
+        emergencyName: 'Family Contact',
+        emergencyPhone: '+234 800 000 0001',
+        status: defaultStatus,
+        createdAt: now,
+        updatedAt: now
+      };
 
+      try {
         await setDoc(doc(db, 'members', memberId), defaultMember);
         activeMember = defaultMember;
-        setMember(defaultMember);
+      } catch {
+        // Non-fatal if user is not yet verified/created via transaction
       }
-
-      // Save to local cache for instant future loads
-      cacheSession(activeProfile, activeMember, currentRole);
-    } catch (err) {
-      console.error('Error fetching user data:', err);
     }
+
+    const resolvedStatus = resolveAccountStatus(activeProfile?.status, activeMember?.status);
+
+    setUserProfile(activeProfile);
+    setMember(activeMember);
+    setRole(verifiedRole);
+    setAccountStatus(resolvedStatus);
+
+    return {
+      role: verifiedRole,
+      accountStatus: resolvedStatus,
+      profile: activeProfile,
+      memberData: activeMember
+    };
   };
 
   useEffect(() => {
     let isMounted = true;
 
-    // Listen to Firebase Auth
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        if (isMounted) {
-          setFirebaseUser(user);
-          localStorage.setItem(LOCAL_STORAGE_KEY, user.uid);
-          setLoading(false);
-          // Sync fresh user data in background
-          fetchUserDataByUid(user.uid, user.email || '', user.displayName || '');
-        }
-      } else {
-        // If Firebase Auth has no user, check persistent local storage session
-        const storedUid = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (storedUid) {
-          try {
-            const userSnap = await getDoc(doc(db, 'users', storedUid));
-            if (userSnap.exists()) {
-              const uData = userSnap.data() as UserProfile;
-              if (isMounted) {
-                setFirebaseUser({
-                  uid: storedUid,
-                  email: uData.email,
-                  displayName: uData.displayName
-                });
-                fetchUserDataByUid(storedUid, uData.email, uData.displayName);
-              }
-            } else {
-              // Only remove if document explicitly doesn't exist on server
-              localStorage.removeItem(LOCAL_STORAGE_KEY);
-              localStorage.removeItem(CACHE_PROFILE_KEY);
-              localStorage.removeItem(CACHE_MEMBER_KEY);
-              localStorage.removeItem(CACHE_ROLE_KEY);
-            }
-          } catch (e: any) {
-            // When offline or network is degraded, preserve cached session
-            const cachedProfileStr = localStorage.getItem(CACHE_PROFILE_KEY);
-            if (cachedProfileStr && isMounted) {
-              try {
-                const uData = JSON.parse(cachedProfileStr);
-                setFirebaseUser({
-                  uid: storedUid,
-                  email: uData.email,
-                  displayName: uData.displayName
-                });
-              } catch {}
-            }
+      if (!isMounted) return;
+
+      if (!user) {
+        setFirebaseUser(null);
+        setUserProfile(null);
+        setMember(null);
+        setRole('member');
+        setEmailVerified(false);
+        setAccountStatus('active');
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setFirebaseUser(user);
+        setEmailVerified(Boolean(user.emailVerified));
+
+        const result = await fetchUserDataByUid(user);
+        if (!isMounted) return;
+
+        // Default initial portal preference to admin when verified active admin signs in on refresh
+        if (result.role === 'admin' || result.role === 'super_admin') {
+          setLoginModePreference((prev) => (prev === 'member' ? 'admin' : prev));
+          if (user.emailVerified && result.accountStatus === 'active') {
+            seedDatabaseIfEmpty().catch(() => {});
           }
+        } else {
+          setLoginModePreference('member');
         }
+      } catch (err) {
+        console.error('Auth state verification error:', err);
+      } finally {
         if (isMounted) {
           setLoading(false);
         }
@@ -265,183 +248,203 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const refreshProfile = async () => {
-    if (firebaseUser?.uid) {
-      await fetchUserDataByUid(firebaseUser.uid, firebaseUser.email || '', firebaseUser.displayName || '');
+    if (auth.currentUser) {
+      await fetchUserDataByUid(auth.currentUser);
     }
   };
 
-  const signIn = async (email: string, pass: string) => {
-    const cleanEmail = email.toLowerCase().trim();
+  const refreshAuthState = async (): Promise<SignInResult> => {
+    const current = auth.currentUser;
+    if (!current) {
+      throw new Error('No authenticated user session found. Please sign in.');
+    }
+    await reload(current);
+    // Force token refresh so Firestore rules see updated email_verified claim immediately
+    await current.getIdToken(true);
+    const verified = Boolean(current.emailVerified);
+    setFirebaseUser(current);
+    setEmailVerified(verified);
 
-    // 1. Try Firebase Auth sign-in first
-    let authUser: any = null;
-    let authFailedWithProviderDisabled = false;
+    const data = await fetchUserDataByUid(current);
+    return {
+      role: data.role,
+      emailVerified: verified,
+      accountStatus: data.accountStatus
+    };
+  };
 
+  const resendVerificationEmail = async (): Promise<void> => {
+    const current = auth.currentUser;
+    if (!current) {
+      throw new Error('Please sign in first to resend your verification email.');
+    }
     try {
-      const cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
-      authUser = cred.user;
+      await sendEmailVerification(current);
     } catch (err: any) {
+      if (err?.code === 'auth/too-many-requests') {
+        throw new Error('Too many verification emails sent recently. Please wait a few minutes and check your inbox/spam folder.');
+      }
+      throw new Error(err?.message || 'Unable to send verification email. Please try again shortly.');
+    }
+  };
+
+  const signIn = async (
+    email: string,
+    pass: string,
+    portalMode: PortalLoginMode = 'member'
+  ): Promise<SignInResult> => {
+    const cleanEmail = email.toLowerCase().trim();
+    if (!cleanEmail || !pass) {
+      throw new Error('Please enter both your email address and password.');
+    }
+
+    let cred;
+    try {
+      cred = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+    } catch (err: any) {
+      if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/admin-restricted-operation') {
+        throw new Error('Email/Password authentication is not enabled in Firebase Authentication. Please enable it in the Firebase Console.');
+      }
       if (
-        err.code === 'auth/operation-not-allowed' || 
-        err.code === 'auth/admin-restricted-operation' ||
-        err.message?.includes('operation-not-allowed')
+        err.code === 'auth/invalid-credential' ||
+        err.code === 'auth/wrong-password' ||
+        err.code === 'auth/user-not-found'
       ) {
-        authFailedWithProviderDisabled = true;
-      } else if (err.code === 'auth/wrong-password') {
-        throw new Error('Incorrect password. Please try again.');
-      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-        // Check Firestore database before giving up
-        authFailedWithProviderDisabled = true;
-      } else {
-        authFailedWithProviderDisabled = true;
+        throw new Error('Invalid email or password. Please verify your credentials and try again.');
       }
+      if (err.code === 'auth/user-disabled') {
+        throw new Error('This authentication account has been disabled. Please contact church administration.');
+      }
+      if (err.code === 'auth/too-many-requests') {
+        throw new Error('Too many failed sign-in attempts. Please wait a few minutes or reset your password.');
+      }
+      if (err.code === 'auth/network-request-failed') {
+        throw new Error('Network connection error. Please check your internet connection and try again.');
+      }
+      throw new Error(err.message || 'Unable to sign in. Please check your credentials.');
     }
 
-    if (authUser) {
-      setFirebaseUser(authUser);
-      localStorage.setItem(LOCAL_STORAGE_KEY, authUser.uid);
-      await fetchUserDataByUid(authUser.uid, authUser.email || '', authUser.displayName || '');
-      return;
+    await reload(cred.user);
+    await cred.user.getIdToken(true);
+    const isEmailVerified = Boolean(cred.user.emailVerified);
+
+    const fetched = await fetchUserDataByUid(cred.user);
+
+    // Enforce Admin Portal authorization strictly via Firebase/Firestore role
+    if (portalMode === 'admin' && fetched.role !== 'admin' && fetched.role !== 'super_admin') {
+      await fbSignOut(auth);
+      setFirebaseUser(null);
+      setUserProfile(null);
+      setMember(null);
+      setRole('member');
+      setEmailVerified(false);
+      setAccountStatus('active');
+      throw new Error('Access denied: This account does not have Administrator privileges. Please use Member Sign In.');
     }
 
-    // 2. Fallback to Firestore authenticated credentials
-    if (authFailedWithProviderDisabled) {
-      const userQuery = query(collection(db, 'users'), where('email', '==', cleanEmail));
-      const userSnap = await getDocs(userQuery);
+    setFirebaseUser(cred.user);
+    setEmailVerified(isEmailVerified);
+    setLoginModePreference(portalMode);
 
-      if (userSnap.empty) {
-        throw new Error('We could not find an account with that email. Please check your email or register.');
-      }
-
-      const userDoc = userSnap.docs[0];
-      const userData = userDoc.data();
-      const enteredHash = await hashPassword(pass);
-
-      // Verify password hash if present
-      if (userData.passwordHash && userData.passwordHash !== enteredHash) {
-        throw new Error('Incorrect password. Please try again.');
-      }
-
-      const uid = userDoc.id;
-      const syntheticUser = {
-        uid,
-        email: cleanEmail,
-        displayName: userData.displayName || 'Member'
-      };
-
-      setFirebaseUser(syntheticUser);
-      localStorage.setItem(LOCAL_STORAGE_KEY, uid);
-      await fetchUserDataByUid(uid, cleanEmail, userData.displayName || '');
-      return;
-    }
-
-    throw new Error('Unable to sign in. Please verify your email and password.');
+    return {
+      role: fetched.role,
+      emailVerified: isEmailVerified,
+      accountStatus: fetched.accountStatus
+    };
   };
 
   const signUp = async (formData: any, onProgress?: (stage: string) => void): Promise<Member> => {
     onProgress?.('VALIDATING');
-    const { 
-      email, 
-      password, 
-      firstName, 
-      middleName, 
-      lastName, 
-      gender, 
-      dateOfBirth, 
-      photoUrl, 
-      phone, 
-      address, 
-      city, 
-      state, 
-      country, 
-      departmentId, 
-      departmentName, 
-      groupId, 
-      groupName, 
-      occupation, 
-      skills, 
-      emergencyName, 
-      emergencyPhone 
+    const {
+      email,
+      password,
+      firstName,
+      middleName,
+      lastName,
+      gender,
+      dateOfBirth,
+      photoUrl,
+      phone,
+      address,
+      city,
+      state,
+      country,
+      departmentId,
+      departmentName,
+      groupId,
+      groupName,
+      occupation,
+      skills,
+      emergencyName,
+      emergencyPhone
     } = formData;
 
     const cleanEmail = email.toLowerCase().trim();
-
-    // 1. Check if an account with this email already exists in Firestore
-    onProgress?.('CHECKING_EMAIL');
-    try {
-      const existingSnap = await getDocs(query(collection(db, 'users'), where('email', '==', cleanEmail)));
-      if (!existingSnap.empty) {
-        const error: any = new Error('An account with this email address already exists. Please log in.');
-        error.type = 'auth';
-        error.code = 'auth/email-already-in-use';
-        throw error;
-      }
-    } catch (checkErr: any) {
-      if (checkErr.code === 'auth/email-already-in-use' || checkErr.message?.includes('already exists')) {
-        throw checkErr;
-      }
-      console.warn('Pre-check email query notice:', checkErr);
-    }
-
-    // 2. Generate unique UID and Membership number
-    let uid = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const fullName = `${firstName} ${middleName ? middleName + ' ' : ''}${lastName}`.trim();
-    const passwordHash = await hashPassword(password);
     const now = new Date().toISOString();
 
-    // 3. Try Firebase Auth create user (if enabled)
     onProgress?.('CREATING_AUTH');
-    let newlyCreatedAuthUser: any = null;
+    let userCred;
     try {
-      const userCred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-      uid = userCred.user.uid;
-      newlyCreatedAuthUser = userCred.user;
-      await updateProfile(userCred.user, { displayName: fullName, photoURL: photoUrl || undefined });
-      setFirebaseUser(userCred.user);
+      userCred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
     } catch (authErr: any) {
       if (authErr.code === 'auth/email-already-in-use') {
-        const error: any = new Error('An account with this email address already exists. Please log in.');
+        const error: any = new Error('An account with this email address already exists. Please sign in.');
         error.type = 'auth';
         error.code = 'auth/email-already-in-use';
         throw error;
-      } else if (authErr.code === 'auth/weak-password') {
+      }
+      if (authErr.code === 'auth/weak-password') {
         const error: any = new Error('Password must contain at least 8 characters.');
         error.type = 'auth';
         error.code = 'auth/weak-password';
         throw error;
-      } else if (authErr.code === 'auth/invalid-email') {
+      }
+      if (authErr.code === 'auth/invalid-email') {
         const error: any = new Error('The email address format is invalid. Please check and try again.');
         error.type = 'auth';
         error.code = 'auth/invalid-email';
         throw error;
       }
-      // If operation-not-allowed or admin-restricted, proceed seamlessly with Firestore storage
-      setFirebaseUser({
-        uid,
-        email: cleanEmail,
-        displayName: fullName
-      });
+      if (authErr.code === 'auth/operation-not-allowed') {
+        const error: any = new Error('Email/Password sign-up is disabled in Firebase Console. Please contact church administration.');
+        error.type = 'auth';
+        error.code = 'auth/operation-not-allowed';
+        throw error;
+      }
+      throw authErr;
     }
 
-    // Determine initial role (authorized admin email gets admin role; all others default to member)
-    const assignedRole: UserRole = isEmailAdmin(cleanEmail) ? 'admin' : 'member';
+    const uid = userCred.user.uid;
 
-    // Resolve departmentId and groupId if available
+    try {
+      await updateProfile(userCred.user, {
+        displayName: fullName,
+        photoURL: photoUrl?.trim() || undefined
+      });
+      await sendEmailVerification(userCred.user);
+    } catch (profileErr) {
+      console.warn('Profile/verification email notice:', profileErr);
+    }
+
+    // All self-registrations strictly default to 'member' and 'pending' account activation
+    const assignedRole: UserRole = 'member';
+    const initialStatus: AccountStatus = 'pending';
+
     const resolvedDeptId = departmentId || INITIAL_DEPARTMENTS.find(d => d.name === departmentName)?.id || '';
     const resolvedGroupId = groupId || INITIAL_GROUPS.find(g => g.name === groupName)?.id || '';
 
-    // 4. Prepare User document
     const userProfileData: UserProfile = {
       uid,
       email: cleanEmail,
       role: assignedRole,
+      status: initialStatus,
       displayName: fullName,
       photoURL: photoUrl?.trim() || '',
       createdAt: now,
       updatedAt: now
     };
 
-    // 5. Prepare Member document (captures Step 1, Step 2, Step 3, Step 4)
     const memberId = `mem_${uid.substring(0, 10)}`;
     const membershipNumber = generateMembershipNumber();
 
@@ -449,7 +452,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       id: memberId,
       userId: uid,
       membershipNumber,
-      // Step 1: Personal Information
       firstName: firstName.trim(),
       middleName: middleName?.trim() || '',
       lastName: lastName.trim(),
@@ -457,37 +459,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       gender: gender || 'Other',
       dateOfBirth: dateOfBirth || '1995-01-01',
       photoUrl: photoUrl?.trim() || '',
-      // Step 2: Contact Information
       phone: phone.trim(),
       email: cleanEmail,
       address: address?.trim() || '',
       city: city?.trim() || 'Lagos',
       state: state?.trim() || 'Lagos',
       country: country?.trim() || 'Nigeria',
-      // Step 3: Church Information
       departmentId: resolvedDeptId,
       departmentName: departmentName || 'Choir & Worship',
       groupId: resolvedGroupId,
       groupName: groupName || 'Grace Cell Fellowship',
       membershipDate: now.split('T')[0],
       occupation: occupation?.trim() || '',
-      skills: Array.isArray(skills) ? skills : (skills ? String(skills).split(',').map((s: string) => s.trim()).filter(Boolean) : []),
-      // Step 4: Emergency Contact
+      skills: Array.isArray(skills)
+        ? skills
+        : skills
+        ? String(skills)
+            .split(',')
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+        : [],
       emergencyName: emergencyName?.trim() || 'Emergency Contact',
       emergencyPhone: emergencyPhone?.trim() || phone.trim(),
-      status: 'active',
+      status: initialStatus,
       createdAt: now,
       updatedAt: now
     };
 
-    // 6. Perform Atomic ACID Transaction to write both 'users' and 'members' collections
     onProgress?.('SAVING_DIRECTORY');
     try {
       await runTransaction(db, async (transaction) => {
         const userRef = doc(db, 'users', uid);
         const memberRef = doc(db, 'members', memberId);
 
-        // Transaction reads must happen before transaction writes
         const userSnap = await transaction.get(userRef);
         if (userSnap.exists()) {
           throw new Error('User account already exists in directory.');
@@ -498,106 +502,94 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           throw new Error('Member profile record already exists.');
         }
 
-        // Atomic writes within transaction
-        transaction.set(userRef, {
-          ...userProfileData,
-          passwordHash
-        });
+        transaction.set(userRef, userProfileData);
         transaction.set(memberRef, newMember);
       });
     } catch (writeErr: any) {
-      console.warn('Firestore transaction had an issue, trying writeBatch fallback:', writeErr);
+      // Rollback newly created Firebase Auth user so no orphaned Auth record remains
       try {
-        const batch = writeBatch(db);
-        const userRef = doc(db, 'users', uid);
-        const memberRef = doc(db, 'members', memberId);
-        batch.set(userRef, {
-          ...userProfileData,
-          passwordHash
-        });
-        batch.set(memberRef, newMember);
-        await batch.commit();
-      } catch (fallbackErr: any) {
-        console.error('Firestore writeBatch fallback also failed:', fallbackErr);
-
-        // Rollback newly created Auth user to avoid orphaned Auth record
-        if (newlyCreatedAuthUser) {
-          try {
-            await newlyCreatedAuthUser.delete();
-            console.log('Successfully rolled back Firebase Auth account after database transaction failure');
-          } catch (delErr) {
-            console.warn('Failed to delete orphaned Auth user:', delErr);
-          }
-        }
-
-        const error: any = new Error(
-          fallbackErr.code === 'permission-denied'
-            ? 'Database permission error: Unable to record your member profile. Please contact church administration.'
-            : fallbackErr.code === 'unavailable'
-            ? 'Database connection unavailable: The server could not be reached. Please check your internet connection.'
-            : fallbackErr.message || 'Atomic database transaction failed: Could not record user and member profiles in church directory.'
-        );
-        error.type = 'firestore';
-        error.code = fallbackErr.code || 'firestore/transaction-failed';
-        throw error;
+        await userCred.user.delete();
+      } catch (delErr) {
+        console.warn('Failed to roll back orphaned Auth user:', delErr);
       }
+
+      const error: any = new Error(
+        writeErr.code === 'permission-denied'
+          ? 'Database permission error: Unable to record your member profile. Please contact church administration.'
+          : writeErr.code === 'unavailable'
+          ? 'Database connection unavailable: Please check your internet connection.'
+          : writeErr.message || 'Atomic database transaction failed while creating your member profile.'
+      );
+      error.type = 'firestore';
+      error.code = writeErr.code || 'firestore/transaction-failed';
+      throw error;
     }
 
     onProgress?.('FINALIZING');
 
-    // Save session in localStorage so the user remains signed in
-    localStorage.setItem(LOCAL_STORAGE_KEY, uid);
-
+    setFirebaseUser(userCred.user);
+    setEmailVerified(Boolean(userCred.user.emailVerified));
     setUserProfile(userProfileData);
     setMember(newMember);
     setRole(assignedRole);
+    setAccountStatus(initialStatus);
+    setLoginModePreference('member');
 
     return newMember;
   };
 
   const signOut = async () => {
-    localStorage.removeItem(LOCAL_STORAGE_KEY);
-    localStorage.removeItem(CACHE_PROFILE_KEY);
-    localStorage.removeItem(CACHE_MEMBER_KEY);
-    localStorage.removeItem(CACHE_ROLE_KEY);
     try {
       await fbSignOut(auth);
     } catch {
-      // quiet catch
+      // ignore
     }
     setFirebaseUser(null);
     setUserProfile(null);
     setMember(null);
     setRole('member');
+    setEmailVerified(false);
+    setAccountStatus('active');
+    setLoginModePreference('member');
   };
 
   const resetPassword = async (email: string) => {
     const cleanEmail = email.toLowerCase().trim();
-    const userQuery = query(collection(db, 'users'), where('email', '==', cleanEmail));
-    const snap = await getDocs(userQuery);
-    if (snap.empty) {
-      throw new Error('No registered account was found with this email address.');
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('Please enter a valid email address.');
     }
     try {
       await sendPasswordResetEmail(auth, cleanEmail);
-    } catch {
-      // If Firebase Auth email delivery is not configured, we still confirm for privacy/security
+    } catch (err: any) {
+      if (err.code === 'auth/invalid-email') {
+        throw new Error('Please enter a valid email address.');
+      }
+      if (err.code === 'auth/user-not-found') {
+        throw new Error('No registered account was found with this email address.');
+      }
+      if (err.code === 'auth/too-many-requests') {
+        throw new Error('Too many password reset requests. Please wait a few minutes before trying again.');
+      }
+      if (err.code === 'auth/network-request-failed') {
+        throw new Error('Network error. Please check your internet connection and try again.');
+      }
+      throw new Error(err.message || 'Unable to send password reset email. Please try again.');
     }
   };
 
   const updateMemberProfile = async (updates: Partial<Member>) => {
     if (!member) return;
+    const { status: _ignoredStatus, userId: _ignoredUid, membershipNumber: _ignoredNum, id: _ignoredId, ...safeUpdates } = updates as any;
     try {
       const now = new Date().toISOString();
-      const updated = { ...member, ...updates, updatedAt: now };
+      const updated = { ...member, ...safeUpdates, updatedAt: now };
       await updateDoc(doc(db, 'members', member.id), {
-        ...updates,
+        ...safeUpdates,
         updatedAt: now
       });
       setMember(updated);
     } catch (err) {
-      console.error('Error updating profile:', err);
-      throw new Error('Failed to update profile information.');
+      handleFirestoreError(err, OperationType.UPDATE, `members/${member.id}`);
     }
   };
 
@@ -608,11 +600,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         userProfile,
         member,
         role,
+        emailVerified,
+        accountStatus,
+        loginModePreference,
+        setLoginModePreference,
         loading,
         signIn,
         signUp,
         signOut,
         resetPassword,
+        resendVerificationEmail,
+        refreshAuthState,
         updateMemberProfile,
         refreshProfile
       }}

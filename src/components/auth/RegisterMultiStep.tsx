@@ -28,8 +28,6 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { INITIAL_DEPARTMENTS, INITIAL_GROUPS } from '../../lib/seedData';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
 
 interface RegisterMultiStepProps {
   onSwitchToLogin: () => void;
@@ -253,45 +251,6 @@ export const RegisterMultiStep: React.FC<RegisterMultiStepProps> = ({
 
   const handleNext = async () => {
     if (!validateStep(step)) return;
-
-    // When advancing from Step 2, check for duplicate email beforehand
-    if (step === 2) {
-      setCheckingEmail(true);
-      setError(null);
-      try {
-        const cleanEmail = formData.email.toLowerCase().trim();
-        const existingSnap = await getDocs(query(collection(db, 'users'), where('email', '==', cleanEmail)));
-        if (!existingSnap.empty) {
-          setFieldErrors(prev => ({ ...prev, email: 'This email is already registered.' }));
-          setError({
-            title: 'Account Already Exists',
-            message: `An account with ${cleanEmail} is already registered with FaithTrack. You can sign in directly to your account.`,
-            type: 'duplicate',
-            field: 'email',
-            targetStep: 2,
-            primaryAction: {
-              label: 'Sign In to Existing Account',
-              onClick: onSwitchToLogin,
-              icon: <LogIn className="w-3.5 h-3.5" />
-            },
-            secondaryAction: {
-              label: 'Use Another Email',
-              onClick: () => {
-                setError(null);
-                setFieldErrors({});
-              }
-            }
-          });
-          setCheckingEmail(false);
-          return;
-        }
-      } catch (err) {
-        console.warn('Email pre-check notice:', err);
-      } finally {
-        setCheckingEmail(false);
-      }
-    }
-
     setStep(prev => prev + 1);
   };
 
@@ -1039,9 +998,10 @@ export const RegisterMultiStep: React.FC<RegisterMultiStepProps> = ({
             </div>
 
             <div>
-              <h3 className="text-2xl font-black text-slate-900">Welcome to the Family! 🎉</h3>
+              <h3 className="text-2xl font-black text-slate-900">Registration Submitted! 🎉</h3>
               <p className="text-sm text-slate-600 mt-1 max-w-sm mx-auto">
-                Your member account has been atomically registered and synchronized in the church database.
+                Your Member profile has been created. We sent a verification link to{' '}
+                <strong className="text-slate-900">{formData.email}</strong>. Please verify your email and await administrator activation.
               </p>
             </div>
 
@@ -1060,7 +1020,7 @@ export const RegisterMultiStep: React.FC<RegisterMultiStepProps> = ({
               <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] text-emerald-300/80 block uppercase">Membership ID</span>
-                  <span className="text-sm font-mono font-bold">{createdMembershipNumber || 'FT-2026-ACTIVE'}</span>
+                  <span className="text-sm font-mono font-bold">{createdMembershipNumber || 'FT-2026-PENDING'}</span>
                 </div>
                 <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
                   <Church className="w-4 h-4 text-emerald-200" />
@@ -1075,7 +1035,7 @@ export const RegisterMultiStep: React.FC<RegisterMultiStepProps> = ({
               className="w-full max-w-xs mx-auto"
               onClick={onRegisteredSuccess}
             >
-              Go to My Dashboard
+              Continue to Verification
             </Button>
           </div>
         )}

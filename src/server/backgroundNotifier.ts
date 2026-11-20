@@ -1,16 +1,6 @@
-import { db } from '../lib/firebase';
-import { 
-  collection, 
-  getDocs, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  updateDoc, 
-  query, 
-  where 
-} from 'firebase/firestore';
 import { ChurchEvent, Member, ActivityRegistration, EmailDispatchRecord } from '../types';
 import { formatDateReadable, formatTime12Hour } from '../lib/utils';
+import { fsGetDoc, fsListCollection, fsPatchFields, fsSetDoc } from './firestoreRest';
 
 export interface NotificationCheckResult {
   timestamp: string;
@@ -31,7 +21,6 @@ export interface NotificationCheckResult {
 interface NotifierState {
   isRunning: boolean;
   intervalMinutes: number;
-  timerId: NodeJS.Timeout | null;
   lastRunAt: string | null;
   lastResult: NotificationCheckResult | null;
   totalHistoricalReminders: number;
@@ -40,18 +29,14 @@ interface NotifierState {
 const state: NotifierState = {
   isRunning: false,
   intervalMinutes: 5,
-  timerId: null,
   lastRunAt: null,
   lastResult: null,
-  totalHistoricalReminders: 0,
+  totalHistoricalReminders: 0
 };
 
 // In-memory cache for recent dispatched emails for instant admin preview
 const recentDispatchedEmails: EmailDispatchRecord[] = [];
 
-/**
- * Checks if a given event date falls within the upcoming notification window (from today up to 48 hours ahead).
- */
 function isUpcomingWindow(eventDateStr: string): boolean {
   try {
     const today = new Date();
@@ -61,7 +46,6 @@ function isUpcomingWindow(eventDateStr: string): boolean {
     const diffMs = eventDate.getTime() - today.getTime();
     const diffDays = diffMs / (1000 * 60 * 60 * 24);
 
-    // Matches if event is today, tomorrow, or day after tomorrow (0, 1, or 2 days away)
     return diffDays >= 0 && diffDays <= 2;
   } catch {
     return false;
@@ -69,10 +53,10 @@ function isUpcomingWindow(eventDateStr: string): boolean {
 }
 
 /**
- * Core function that executes the background check for upcoming church activities
- * and dispatches in-app, push, and email notifications to registered members.
+ * Executes the upcoming activity reminder scan using an authenticated Admin ID token
+ * so all Firestore reads and writes strictly pass security rules.
  */
-export async function runNotificationCheck(): Promise<NotificationCheckResult> {
+export async function runNotificationCheck(adminIdToken: string): Promise<NotificationCheckResult> {
   const now = new Date();
   const timestamp = now.toISOString();
 
@@ -87,10 +71,7 @@ export async function runNotificationCheck(): Promise<NotificationCheckResult> {
   };
 
   try {
-    // 1. Fetch upcoming and active events from Firestore
-    const eventsSnap = await getDocs(collection(db, 'events'));
-    const allEvents: ChurchEvent[] = eventsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ChurchEvent));
-
+    const allEvents = await fsListCollection<ChurchEvent>('events', adminIdToken);
     const upcomingEvents = allEvents.filter(ev => {
       if (ev.status === 'cancelled' || ev.status === 'completed') return false;
       return isUpcomingWindow(ev.date);
@@ -106,27 +87,16 @@ export async function runNotificationCheck(): Promise<NotificationCheckResult> {
       return result;
     }
 
-    // 2. Fetch all members and active registrations
-    const [registrationsSnap, membersSnap] = await Promise.all([
-      getDocs(collection(db, 'activity_registrations')),
-      getDocs(collection(db, 'members'))
+    const [allRegistrations, allMembers] = await Promise.all([
+      fsListCollection<ActivityRegistration>('activity_registrations', adminIdToken),
+      fsListCollection<Member>('members', adminIdToken)
     ]);
 
-    const allRegistrations: ActivityRegistration[] = registrationsSnap.docs.map(
-      d => ({ id: d.id, ...d.data() } as ActivityRegistration)
-    );
-    const allMembers: Member[] = membersSnap.docs.map(
-      d => ({ id: d.id, ...d.data() } as Member)
-    );
-
-    // 3. Process each upcoming event
     for (const event of upcomingEvents) {
-      // Find members who explicitly registered for this event
       const eventRegistrations = allRegistrations.filter(
         r => r.eventId === event.id && r.status === 'confirmed'
       );
 
-      // Recipients list: pre-registered members, with fallback to active general members if open assembly
       let recipients: Array<{
         memberId: string;
         userId: string;
@@ -146,8 +116,6 @@ export async function runNotificationCheck(): Promise<NotificationCheckResult> {
           registrationId: r.id
         }));
       } else {
-        // Fallback for general services (Sunday Service, Digging Deep, Faith Clinic)
-        // so members don't miss regular weekly church assemblies
         recipients = allMembers
           .filter(m => m.status === 'active' && m.email)
           .map(m => ({
@@ -166,18 +134,15 @@ export async function runNotificationCheck(): Promise<NotificationCheckResult> {
         const targetUserId = recipient.userId || recipient.memberId;
         const notifId = `notif_${event.id}_${recipient.memberId}`;
 
-        // Check if reminder notification was already sent for this event + member
-        const existingNotifSnap = await getDoc(doc(db, 'notifications', notifId));
-        if (existingNotifSnap.exists()) {
-          continue; // Already notified, avoid duplicate spam
+        const existingNotif = await fsGetDoc('notifications', notifId, adminIdToken);
+        if (existingNotif) {
+          continue;
         }
 
         const dateReadable = formatDateReadable(event.date);
         const timeReadable = formatTime12Hour(event.startTime);
         const checkInOpen = formatTime12Hour(event.checkInOpenTime);
-        const checkInClose = formatTime12Hour(event.checkInCloseTime);
 
-        // A. Create In-App & Push Notification
         const notificationPayload = {
           id: notifId,
           userId: targetUserId,
@@ -192,9 +157,8 @@ export async function runNotificationCheck(): Promise<NotificationCheckResult> {
           createdAt: timestamp
         };
 
-        await setDoc(doc(db, 'notifications', notifId), notificationPayload);
+        await fsSetDoc('notifications', notifId, notificationPayload, adminIdToken);
 
-        // B. Generate Email Notification Record
         const emailSubject = `Upcoming Church Service Reminder: ${event.title} • FaithTrack Cathedral`;
         const emailSnippet = `Peace be with you, ${recipient.name}! This is a reminder for ${event.title} on ${dateReadable} at ${timeReadable}. Location: ${event.location}. Check-in token: ${event.qrSessionToken || 'FT-SANCTUARY'}`;
 
@@ -212,18 +176,24 @@ export async function runNotificationCheck(): Promise<NotificationCheckResult> {
           dispatchedAt: timestamp
         };
 
-        await setDoc(doc(db, 'email_dispatches', dispatchId), emailRecord);
+        await fsSetDoc('email_dispatches', dispatchId, emailRecord, adminIdToken);
         recentDispatchedEmails.unshift(emailRecord);
         if (recentDispatchedEmails.length > 50) recentDispatchedEmails.pop();
 
-        // C. Update registration reminder status if applicable
         if (recipient.registrationId) {
           try {
-            await updateDoc(doc(db, 'activity_registrations', recipient.registrationId), {
-              reminderSent: true,
-              lastReminderAt: timestamp
-            });
-          } catch {}
+            await fsPatchFields(
+              'activity_registrations',
+              recipient.registrationId,
+              {
+                reminderSent: true,
+                lastReminderAt: timestamp
+              },
+              adminIdToken
+            );
+          } catch {
+            // non-fatal
+          }
         }
 
         remindersSentForThisEvent++;
@@ -246,19 +216,24 @@ export async function runNotificationCheck(): Promise<NotificationCheckResult> {
     state.lastResult = result;
     state.totalHistoricalReminders += result.totalRemindersSent;
 
-    // Log check execution to Firestore audit log
     try {
       const logId = `audit_check_${Date.now()}`;
-      await setDoc(doc(db, 'notification_audit_logs', logId), {
-        id: logId,
-        timestamp,
-        upcomingEventsFound: result.upcomingEventsFound,
-        totalRemindersSent: result.totalRemindersSent,
-        totalEmailsDispatched: result.totalEmailsDispatched,
-        status: result.status
-      });
-    } catch {}
-
+      await fsSetDoc(
+        'notification_audit_logs',
+        logId,
+        {
+          id: logId,
+          timestamp,
+          upcomingEventsFound: result.upcomingEventsFound,
+          totalRemindersSent: result.totalRemindersSent,
+          totalEmailsDispatched: result.totalEmailsDispatched,
+          status: result.status
+        },
+        adminIdToken
+      );
+    } catch {
+      // non-fatal
+    }
   } catch (err: any) {
     console.error('Background notification check error:', err);
     result.status = 'error';
@@ -268,45 +243,6 @@ export async function runNotificationCheck(): Promise<NotificationCheckResult> {
   return result;
 }
 
-/**
- * Starts the recurring background notification timer.
- */
-export function startBackgroundNotifier(intervalMinutes = 5) {
-  if (state.isRunning && state.timerId) {
-    clearInterval(state.timerId);
-  }
-
-  state.intervalMinutes = intervalMinutes;
-  state.isRunning = true;
-
-  console.log(`[FaithTrack] Background Activity Notifier started (Interval: ${intervalMinutes} minutes)`);
-
-  // Execute initial check after a short 10s warmup
-  setTimeout(() => {
-    runNotificationCheck().catch(e => console.error('[FaithTrack] Initial check error:', e));
-  }, 10000);
-
-  // Set recurring interval
-  state.timerId = setInterval(() => {
-    runNotificationCheck().catch(e => console.error('[FaithTrack] Scheduled check error:', e));
-  }, intervalMinutes * 60 * 1000);
-}
-
-/**
- * Stops the recurring background notification timer.
- */
-export function stopBackgroundNotifier() {
-  if (state.timerId) {
-    clearInterval(state.timerId);
-    state.timerId = null;
-  }
-  state.isRunning = false;
-  console.log('[FaithTrack] Background Activity Notifier stopped');
-}
-
-/**
- * Returns current status and telemetry of the background notifier.
- */
 export function getNotifierStatus() {
   return {
     isRunning: state.isRunning,

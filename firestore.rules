@@ -2,70 +2,565 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 1. Church Core Collections
-    match /events/{document=**} {
-      allow read, write: if true;
-    }
-
-    match /announcements/{document=**} {
-      allow read, write: if true;
-    }
-
-    match /departments/{document=**} {
-      allow read, write: if true;
-    }
-
-    match /groups/{document=**} {
-      allow read, write: if true;
-    }
-
-    match /settings/{document=**} {
-      allow read, write: if true;
-    }
-
-    match /checkInSessions/{document=**} {
-      allow read, write: if true;
-    }
-
-    // 2. Attendance & QR Check-Ins
-    match /attendance/{document=**} {
-      allow read, write: if true;
-    }
-
-    // 3. User Profiles & Member Directory
-    match /users/{document=**} {
-      allow read, write: if true;
-    }
-
-    match /members/{document=**} {
-      allow read, write: if true;
-    }
-
-    // 4. Pre-Registrations & Automated Reminders
-    match /activity_registrations/{document=**} {
-      allow read, write: if true;
-    }
-
-    match /notifications/{document=**} {
-      allow read, write: if true;
-    }
-
-    match /notification_audit_logs/{document=**} {
-      allow read, write: if true;
-    }
-
-    match /email_dispatches/{document=**} {
-      allow read, write: if true;
-    }
-
-    // 5. Prayer Requests & Intercession Wall
-    match /prayer_requests/{document=**} {
-      allow read, write: if true;
-    }
-
-    // Default deny for unmanaged collections
+    // Global safety net: default deny everything
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    // ---------------------------------------------------------
+    // GLOBAL HELPERS (Order: Auth -> Static Validation -> DB)
+    // ---------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidStr(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidOptStr(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isValidTimestampStr(val) {
+      return val is string && val.size() >= 10 && val.size() <= 40;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function userDocExists(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function getUserDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function isActiveUserRecord(uid) {
+      return userDocExists(uid) &&
+        (!('status' in getUserDoc(uid)) || getUserDoc(uid).status == 'active');
+    }
+
+    function isVerifiedActiveUser() {
+      return isEmailVerified() && isActiveUserRecord(request.auth.uid);
+    }
+
+    function isVerifiedAdmin() {
+      return isEmailVerified() &&
+        userDocExists(request.auth.uid) &&
+        getUserDoc(request.auth.uid).role in ['admin', 'super_admin'] &&
+        (!('status' in getUserDoc(request.auth.uid)) || getUserDoc(request.auth.uid).status == 'active');
+    }
+
+    // ---------------------------------------------------------
+    // ENTITY VALIDATION BLUEPRINTS
+    // ---------------------------------------------------------
+    function isValidUserCreate(data, uid) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'status', 'memberId', 'displayName', 'photoURL', 'createdAt', 'updatedAt']) &&
+        data.uid == uid &&
+        data.uid == request.auth.uid &&
+        isValidStr(data.email, 3, 254) &&
+        data.role == 'member' &&
+        data.status == 'pending' &&
+        isValidOptStr(data, 'memberId', 128) &&
+        isValidOptStr(data, 'displayName', 150) &&
+        isValidOptStr(data, 'photoURL', 1000) &&
+        isValidTimestampStr(data.createdAt) &&
+        isValidTimestampStr(data.updatedAt);
+    }
+
+    function isValidUserUpdate(data, prev, uid) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'status', 'memberId', 'displayName', 'photoURL', 'passwordHash', 'createdAt', 'updatedAt']) &&
+        data.uid == prev.uid &&
+        data.email == prev.email &&
+        data.createdAt == prev.createdAt &&
+        (!('passwordHash' in data) || ('passwordHash' in prev && data.passwordHash == prev.passwordHash)) &&
+        data.role in ['member', 'admin', 'super_admin'] &&
+        (!('status' in data) || data.status in ['pending', 'active', 'suspended']) &&
+        prev.role != 'super_admin' &&
+        (uid != request.auth.uid || data.role == prev.role) &&
+        isValidOptStr(data, 'memberId', 128) &&
+        isValidOptStr(data, 'displayName', 150) &&
+        isValidOptStr(data, 'photoURL', 1000) &&
+        isValidTimestampStr(data.updatedAt);
+    }
+
+    function isValidMember(data) {
+      return data.keys().hasAll(['id', 'userId', 'membershipNumber', 'firstName', 'lastName', 'fullName', 'email', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'membershipNumber', 'firstName', 'middleName', 'lastName', 'fullName',
+          'gender', 'dateOfBirth', 'photoUrl', 'phone', 'email', 'address', 'city', 'state', 'country',
+          'departmentId', 'departmentName', 'groupId', 'groupName', 'membershipDate', 'occupation',
+          'skills', 'emergencyName', 'emergencyPhone', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidStr(data.userId, 1, 128) &&
+        isValidStr(data.membershipNumber, 3, 40) &&
+        isValidStr(data.firstName, 1, 80) &&
+        isValidOptStr(data, 'middleName', 80) &&
+        isValidStr(data.lastName, 1, 80) &&
+        isValidStr(data.fullName, 1, 200) &&
+        (!('gender' in data) || data.gender in ['Male', 'Female', 'Other']) &&
+        isValidOptStr(data, 'dateOfBirth', 30) &&
+        isValidOptStr(data, 'photoUrl', 1000) &&
+        isValidOptStr(data, 'phone', 40) &&
+        isValidStr(data.email, 3, 254) &&
+        isValidOptStr(data, 'address', 300) &&
+        isValidOptStr(data, 'city', 100) &&
+        isValidOptStr(data, 'state', 100) &&
+        isValidOptStr(data, 'country', 100) &&
+        isValidOptStr(data, 'departmentId', 128) &&
+        isValidOptStr(data, 'departmentName', 120) &&
+        isValidOptStr(data, 'groupId', 128) &&
+        isValidOptStr(data, 'groupName', 120) &&
+        isValidOptStr(data, 'membershipDate', 30) &&
+        isValidOptStr(data, 'occupation', 120) &&
+        (!('skills' in data) || (data.skills is list && data.skills.size() <= 25)) &&
+        isValidOptStr(data, 'emergencyName', 120) &&
+        isValidOptStr(data, 'emergencyPhone', 40) &&
+        data.status in ['pending', 'active', 'suspended'] &&
+        isValidTimestampStr(data.createdAt) &&
+        isValidTimestampStr(data.updatedAt);
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll(['id', 'title', 'type', 'date', 'startTime', 'endTime', 'location', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'title', 'description', 'type', 'date', 'startTime', 'endTime', 'location',
+          'recurring', 'attendanceEnabled', 'checkInOpenTime', 'checkInCloseTime',
+          'status', 'attendeesCount', 'expectedCount', 'qrSessionToken', 'qrSessionExpiresAt',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidStr(data.title, 1, 200) &&
+        isValidOptStr(data, 'description', 2000) &&
+        isValidStr(data.type, 1, 80) &&
+        isValidStr(data.date, 8, 30) &&
+        isValidStr(data.startTime, 3, 20) &&
+        isValidStr(data.endTime, 3, 20) &&
+        isValidStr(data.location, 1, 300) &&
+        data.status in ['upcoming', 'ongoing', 'completed', 'cancelled'] &&
+        (!('recurring' in data) || data.recurring is bool) &&
+        (!('attendanceEnabled' in data) || data.attendanceEnabled is bool) &&
+        isValidOptStr(data, 'checkInOpenTime', 20) &&
+        isValidOptStr(data, 'checkInCloseTime', 20) &&
+        (!('attendeesCount' in data) || (data.attendeesCount is number && data.attendeesCount >= 0)) &&
+        (!('expectedCount' in data) || (data.expectedCount is number && data.expectedCount >= 0)) &&
+        isValidOptStr(data, 'qrSessionToken', 100) &&
+        isValidOptStr(data, 'qrSessionExpiresAt', 40) &&
+        isValidTimestampStr(data.createdAt) &&
+        isValidTimestampStr(data.updatedAt);
+    }
+
+    function isValidCheckInSession(data) {
+      return data.keys().hasAll(['id', 'eventId', 'token', 'expiresAt', 'status', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'eventId', 'token', 'expiresAt', 'status', 'openedBy', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.eventId) &&
+        isValidStr(data.token, 3, 100) &&
+        isValidTimestampStr(data.expiresAt) &&
+        data.status in ['active', 'closed'] &&
+        isValidOptStr(data, 'openedBy', 150) &&
+        isValidTimestampStr(data.createdAt);
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['id', 'eventId', 'eventTitle', 'eventDate', 'userId', 'memberId', 'memberName', 'checkInTime', 'method', 'status', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'eventId', 'eventTitle', 'eventDate', 'userId', 'memberId', 'memberName',
+          'membershipNumber', 'departmentName', 'groupName', 'checkInTime', 'checkInTimeFormatted',
+          'method', 'status', 'verifiedBy', 'notes', 'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.eventId) &&
+        isValidStr(data.eventTitle, 1, 200) &&
+        isValidStr(data.eventDate, 8, 30) &&
+        isValidStr(data.userId, 0, 128) &&
+        isValidStr(data.memberId, 1, 128) &&
+        isValidStr(data.memberName, 1, 200) &&
+        isValidOptStr(data, 'membershipNumber', 40) &&
+        isValidOptStr(data, 'departmentName', 120) &&
+        isValidOptStr(data, 'groupName', 120) &&
+        isValidTimestampStr(data.checkInTime) &&
+        isValidOptStr(data, 'checkInTimeFormatted', 40) &&
+        data.method in ['qr', 'manual'] &&
+        data.status in ['present', 'absent', 'excused'] &&
+        isValidOptStr(data, 'verifiedBy', 120) &&
+        isValidOptStr(data, 'notes', 500) &&
+        isValidTimestampStr(data.createdAt);
+    }
+
+    function isValidDepartment(data) {
+      return data.keys().hasAll(['id', 'name', 'description', 'active', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'name', 'description', 'leaderName', 'active', 'memberCount', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidStr(data.name, 1, 120) &&
+        isValidStr(data.description, 1, 1000) &&
+        isValidOptStr(data, 'leaderName', 120) &&
+        data.active is bool &&
+        (!('memberCount' in data) || (data.memberCount is number && data.memberCount >= 0)) &&
+        isValidTimestampStr(data.createdAt);
+    }
+
+    function isValidGroup(data) {
+      return data.keys().hasAll(['id', 'name', 'description', 'type', 'active', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'name', 'description', 'type', 'leaderName', 'meetingDay', 'active', 'memberCount', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidStr(data.name, 1, 120) &&
+        isValidStr(data.description, 1, 1000) &&
+        data.type in ['Cell', 'Bible Study', 'Fellowship', 'Youth', 'Men', 'Women'] &&
+        isValidOptStr(data, 'leaderName', 120) &&
+        isValidOptStr(data, 'meetingDay', 100) &&
+        data.active is bool &&
+        (!('memberCount' in data) || (data.memberCount is number && data.memberCount >= 0)) &&
+        isValidTimestampStr(data.createdAt);
+    }
+
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['id', 'title', 'message', 'audience', 'status', 'date', 'authorName', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'title', 'message', 'imageUrl', 'audience', 'targetId', 'targetName', 'status', 'date', 'authorName', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidStr(data.title, 1, 200) &&
+        isValidStr(data.message, 1, 5000) &&
+        isValidOptStr(data, 'imageUrl', 1000) &&
+        data.audience in ['everyone', 'department', 'group'] &&
+        isValidOptStr(data, 'targetId', 128) &&
+        isValidOptStr(data, 'targetName', 150) &&
+        data.status in ['draft', 'published', 'archived'] &&
+        isValidStr(data.date, 8, 30) &&
+        isValidStr(data.authorName, 1, 150) &&
+        isValidTimestampStr(data.createdAt);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'message', 'type', 'read', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'title', 'message', 'type', 'read', 'link', 'eventId', 'emailSent', 'pushSent', 'createdAt']) &&
+        isValidId(data.id) &&
+        isValidStr(data.userId, 1, 128) &&
+        isValidStr(data.title, 1, 200) &&
+        isValidStr(data.message, 1, 1500) &&
+        data.type in ['event', 'attendance', 'announcement', 'system'] &&
+        data.read is bool &&
+        isValidOptStr(data, 'link', 300) &&
+        isValidOptStr(data, 'eventId', 128) &&
+        (!('emailSent' in data) || data.emailSent is bool) &&
+        (!('pushSent' in data) || data.pushSent is bool) &&
+        isValidTimestampStr(data.createdAt);
+    }
+
+    function isValidRegistration(data) {
+      return data.keys().hasAll(['id', 'eventId', 'memberId', 'userId', 'status', 'registeredAt']) &&
+        data.keys().hasOnly([
+          'id', 'eventId', 'eventTitle', 'eventDate', 'eventStartTime', 'eventLocation',
+          'memberId', 'userId', 'memberName', 'memberEmail', 'memberPhone', 'membershipNumber',
+          'status', 'reminderSent', 'registeredAt', 'cancelledAt', 'lastReminderAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.eventId) &&
+        isValidOptStr(data, 'eventTitle', 200) &&
+        isValidOptStr(data, 'eventDate', 30) &&
+        isValidOptStr(data, 'eventStartTime', 20) &&
+        isValidOptStr(data, 'eventLocation', 300) &&
+        isValidStr(data.memberId, 1, 128) &&
+        isValidStr(data.userId, 1, 128) &&
+        isValidOptStr(data, 'memberName', 200) &&
+        isValidOptStr(data, 'memberEmail', 254) &&
+        isValidOptStr(data, 'memberPhone', 40) &&
+        isValidOptStr(data, 'membershipNumber', 40) &&
+        data.status in ['confirmed', 'cancelled'] &&
+        (!('reminderSent' in data) || data.reminderSent is bool) &&
+        isValidTimestampStr(data.registeredAt) &&
+        isValidOptStr(data, 'cancelledAt', 40) &&
+        isValidOptStr(data, 'lastReminderAt', 40);
+    }
+
+    function isValidPrayer(data) {
+      return data.keys().hasAll(['id', 'title', 'description', 'category', 'authorId', 'authorName', 'isAnonymous', 'isConfidentialToPastors', 'status', 'prayCount', 'prayedUserIds', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'title', 'description', 'category', 'authorId', 'authorName', 'authorMemberNumber',
+          'isAnonymous', 'isConfidentialToPastors', 'status', 'testimony', 'answeredAt',
+          'prayCount', 'prayedUserIds', 'encouragements', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidStr(data.title, 1, 200) &&
+        isValidStr(data.description, 1, 3000) &&
+        isValidStr(data.category, 1, 80) &&
+        isValidStr(data.authorId, 1, 128) &&
+        isValidStr(data.authorName, 1, 200) &&
+        isValidOptStr(data, 'authorMemberNumber', 40) &&
+        data.isAnonymous is bool &&
+        data.isConfidentialToPastors is bool &&
+        data.status in ['active', 'answered', 'archived'] &&
+        isValidOptStr(data, 'testimony', 3000) &&
+        isValidOptStr(data, 'answeredAt', 40) &&
+        data.prayCount is number && data.prayCount >= 0 &&
+        data.prayedUserIds is list && data.prayedUserIds.size() <= 5000 &&
+        (!('encouragements' in data) || (data.encouragements is list && data.encouragements.size() <= 500)) &&
+        isValidTimestampStr(data.createdAt) &&
+        isValidTimestampStr(data.updatedAt);
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll(['id', 'churchName', 'address', 'phone', 'email', 'timezone']) &&
+        data.keys().hasOnly([
+          'id', 'churchName', 'tagline', 'logoUrl', 'address', 'phone', 'email', 'timezone',
+          'checkInWindowMinutesBefore', 'checkInWindowMinutesAfter', 'qrSessionExpiryMinutes',
+          'allowManualCheckIn', 'welcomeMessage', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidStr(data.churchName, 1, 200) &&
+        isValidOptStr(data, 'tagline', 300) &&
+        isValidOptStr(data, 'logoUrl', 1000) &&
+        isValidStr(data.address, 1, 300) &&
+        isValidStr(data.phone, 1, 40) &&
+        isValidStr(data.email, 3, 254) &&
+        isValidStr(data.timezone, 1, 80) &&
+        (!('checkInWindowMinutesBefore' in data) || data.checkInWindowMinutesBefore is number) &&
+        (!('checkInWindowMinutesAfter' in data) || data.checkInWindowMinutesAfter is number) &&
+        (!('qrSessionExpiryMinutes' in data) || data.qrSessionExpiryMinutes is number) &&
+        (!('allowManualCheckIn' in data) || data.allowManualCheckIn is bool) &&
+        isValidOptStr(data, 'welcomeMessage', 500) &&
+        isValidOptStr(data, 'updatedAt', 40);
+    }
+
+    // ---------------------------------------------------------
+    // COLLECTION MATCH BLOCKS
+    // ---------------------------------------------------------
+
+    // 1. Users (RBAC & Activation Source of Truth)
+    match /users/{uid} {
+      allow get: if isOwner(uid) || isVerifiedAdmin();
+      allow list: if isVerifiedAdmin();
+      allow create: if isSignedIn() && isValidId(uid) && isOwner(uid) && isValidUserCreate(incoming(), uid);
+      allow update: if isVerifiedAdmin() && isValidId(uid) && isValidUserUpdate(incoming(), existing(), uid);
+      allow delete: if false;
+    }
+
+    // 2. Members (PII isolated to owner or verified Admin)
+    match /members/{memberId} {
+      allow get: if (isSignedIn() && existing().userId == request.auth.uid) || isVerifiedAdmin();
+      allow list: if (isSignedIn() && resource.data.userId == request.auth.uid) || isVerifiedAdmin();
+      allow create: if isSignedIn() && isValidId(memberId) && isValidMember(incoming()) && (
+        (incoming().userId == request.auth.uid && incoming().status == 'pending') ||
+        isVerifiedAdmin()
+      );
+      allow update: if isValidId(memberId) && isValidMember(incoming()) && (
+        isVerifiedAdmin() ||
+        (
+          isVerifiedActiveUser() &&
+          existing().userId == request.auth.uid &&
+          incoming().userId == existing().userId &&
+          incoming().membershipNumber == existing().membershipNumber &&
+          incoming().status == existing().status &&
+          incoming().createdAt == existing().createdAt
+        )
+      );
+      allow delete: if isVerifiedAdmin() && isValidId(memberId);
+    }
+
+    // 3. Events
+    match /events/{eventId} {
+      allow get: if isValidId(eventId) && isVerifiedActiveUser();
+      allow list: if isVerifiedActiveUser();
+      allow create: if isVerifiedAdmin() && isValidId(eventId) && isValidEvent(incoming());
+      allow update: if isVerifiedAdmin() && isValidId(eventId) && isValidEvent(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerifiedAdmin() && isValidId(eventId);
+    }
+
+    // 4. Check-In Sessions
+    match /checkInSessions/{sessionId} {
+      allow get: if isValidId(sessionId) && isVerifiedActiveUser();
+      allow list: if isVerifiedActiveUser();
+      allow create: if isVerifiedAdmin() && isValidId(sessionId) && isValidCheckInSession(incoming());
+      allow update: if isVerifiedAdmin() && isValidId(sessionId) && isValidCheckInSession(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerifiedAdmin() && isValidId(sessionId);
+    }
+
+    // 5. Attendance Records (Owner-scoped list queries)
+    match /attendance/{attendanceId} {
+      allow get: if isValidId(attendanceId) && ((isVerifiedActiveUser() && existing().userId == request.auth.uid) || isVerifiedAdmin());
+      allow list: if (isVerifiedActiveUser() && resource.data.userId == request.auth.uid) || isVerifiedAdmin();
+      allow create: if isValidId(attendanceId) && isValidAttendance(incoming()) && (
+        (isVerifiedActiveUser() && incoming().userId == request.auth.uid) ||
+        isVerifiedAdmin()
+      );
+      allow update: if isVerifiedAdmin() && isValidId(attendanceId) && isValidAttendance(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerifiedAdmin() && isValidId(attendanceId);
+    }
+
+    // 6. Departments
+    match /departments/{departmentId} {
+      allow get: if isValidId(departmentId) && isVerifiedActiveUser();
+      allow list: if isVerifiedActiveUser();
+      allow create: if isVerifiedAdmin() && isValidId(departmentId) && isValidDepartment(incoming());
+      allow update: if isVerifiedAdmin() && isValidId(departmentId) && isValidDepartment(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerifiedAdmin() && isValidId(departmentId);
+    }
+
+    // 7. Fellowship Groups
+    match /groups/{groupId} {
+      allow get: if isValidId(groupId) && isVerifiedActiveUser();
+      allow list: if isVerifiedActiveUser();
+      allow create: if isVerifiedAdmin() && isValidId(groupId) && isValidGroup(incoming());
+      allow update: if isVerifiedAdmin() && isValidId(groupId) && isValidGroup(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerifiedAdmin() && isValidId(groupId);
+    }
+
+    // 8. Announcements
+    match /announcements/{announcementId} {
+      allow get: if isValidId(announcementId) && isVerifiedActiveUser();
+      allow list: if isVerifiedActiveUser();
+      allow create: if isVerifiedAdmin() && isValidId(announcementId) && isValidAnnouncement(incoming());
+      allow update: if isVerifiedAdmin() && isValidId(announcementId) && isValidAnnouncement(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerifiedAdmin() && isValidId(announcementId);
+    }
+
+    // 9. Notifications (Owner-scoped)
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && ((isVerifiedActiveUser() && existing().userId == request.auth.uid) || isVerifiedAdmin());
+      allow list: if (isVerifiedActiveUser() && resource.data.userId == request.auth.uid) || isVerifiedAdmin();
+      allow create: if isValidId(notificationId) && isValidNotification(incoming()) && (
+        (isVerifiedActiveUser() && incoming().userId == request.auth.uid) ||
+        isVerifiedAdmin()
+      );
+      allow update: if isValidId(notificationId) && isValidNotification(incoming()) && (
+        isVerifiedAdmin() ||
+        (
+          isVerifiedActiveUser() &&
+          existing().userId == request.auth.uid &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['read'])
+        )
+      );
+      allow delete: if isVerifiedAdmin() && isValidId(notificationId);
+    }
+
+    // 10. Activity Registrations / RSVPs (Owner-scoped)
+    match /activity_registrations/{registrationId} {
+      allow get: if isValidId(registrationId) && ((isVerifiedActiveUser() && existing().userId == request.auth.uid) || isVerifiedAdmin());
+      allow list: if (isVerifiedActiveUser() && resource.data.userId == request.auth.uid) || isVerifiedAdmin();
+      allow create: if isValidId(registrationId) && isValidRegistration(incoming()) && (
+        (isVerifiedActiveUser() && incoming().userId == request.auth.uid) ||
+        isVerifiedAdmin()
+      );
+      allow update: if isValidId(registrationId) && isValidRegistration(incoming()) && (
+        isVerifiedAdmin() ||
+        (
+          isVerifiedActiveUser() &&
+          existing().userId == request.auth.uid &&
+          incoming().userId == existing().userId &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'cancelledAt'])
+        )
+      );
+      allow delete: if isVerifiedAdmin() && isValidId(registrationId);
+    }
+
+    // 11. Prayer Requests (Confidentiality & Action-Scoped Updates)
+    match /prayer_requests/{prayerId} {
+      allow get: if isValidId(prayerId) && (
+        isVerifiedAdmin() ||
+        (isVerifiedActiveUser() && (existing().isConfidentialToPastors == false || existing().authorId == request.auth.uid))
+      );
+      allow list: if isVerifiedAdmin() || (
+        isVerifiedActiveUser() && (resource.data.isConfidentialToPastors == false || resource.data.authorId == request.auth.uid)
+      );
+      allow create: if isVerifiedActiveUser() && isValidId(prayerId) && isValidPrayer(incoming()) && incoming().authorId == request.auth.uid;
+      allow update: if isValidId(prayerId) && isValidPrayer(incoming()) && (
+        isVerifiedAdmin() ||
+        (
+          isVerifiedActiveUser() &&
+          incoming().authorId == existing().authorId &&
+          incoming().createdAt == existing().createdAt && (
+            // Action 1: Pray / Intercede on visible prayer
+            (
+              (existing().isConfidentialToPastors == false || existing().authorId == request.auth.uid) &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['prayCount', 'prayedUserIds'])
+            ) ||
+            // Action 2: Add encouragement word
+            (
+              (existing().isConfidentialToPastors == false || existing().authorId == request.auth.uid) &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['encouragements'])
+            ) ||
+            // Action 3: Author marks answered with testimony
+            (
+              existing().authorId == request.auth.uid &&
+              existing().status != 'answered' &&
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'testimony', 'answeredAt', 'updatedAt'])
+            )
+          )
+        )
+      );
+      allow delete: if isValidId(prayerId) && (
+        isVerifiedAdmin() ||
+        (isVerifiedActiveUser() && existing().authorId == request.auth.uid)
+      );
+    }
+
+    // 12. Settings
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId) && isVerifiedActiveUser();
+      allow list: if isVerifiedActiveUser();
+      allow create, update: if isVerifiedAdmin() && isValidId(settingId) && isValidSettings(incoming());
+      allow delete: if false;
+    }
+
+    // 13. Immutable Admin Audit Logs
+    match /auditLogs/{logId} {
+      allow get: if isValidId(logId) && isVerifiedAdmin();
+      allow list: if isVerifiedAdmin();
+      allow create: if isVerifiedAdmin() && isValidId(logId) &&
+        incoming().keys().hasAll(['id', 'action', 'details', 'performedBy', 'targetType', 'targetId', 'timestamp']) &&
+        incoming().keys().hasOnly(['id', 'action', 'details', 'performedBy', 'performedByName', 'performedByRole', 'targetType', 'targetId', 'timestamp']) &&
+        isValidId(incoming().id) &&
+        incoming().performedBy == request.auth.uid &&
+        isValidStr(incoming().action, 1, 100) &&
+        isValidStr(incoming().details, 1, 1000) &&
+        isValidTimestampStr(incoming().timestamp);
+      allow update, delete: if false;
+    }
+
+    // 14. Automated Email Dispatches (Admin-only)
+    match /email_dispatches/{dispatchId} {
+      allow get: if isValidId(dispatchId) && isVerifiedAdmin();
+      allow list: if isVerifiedAdmin();
+      allow create: if isVerifiedAdmin() && isValidId(dispatchId) &&
+        incoming().keys().hasAll(['id', 'recipientEmail', 'eventId', 'subject', 'status', 'dispatchedAt']) &&
+        incoming().keys().hasOnly(['id', 'recipientEmail', 'recipientName', 'eventId', 'eventTitle', 'eventDate', 'subject', 'snippet', 'status', 'dispatchedAt']) &&
+        isValidStr(incoming().id, 1, 128) &&
+        isValidStr(incoming().recipientEmail, 3, 254) &&
+        isValidTimestampStr(incoming().dispatchedAt);
+      allow update, delete: if false;
+    }
+
+    // 15. Notification Audit Logs (Admin-only)
+    match /notification_audit_logs/{logId} {
+      allow get: if isValidId(logId) && isVerifiedAdmin();
+      allow list: if isVerifiedAdmin();
+      allow create: if isVerifiedAdmin() && isValidId(logId) &&
+        incoming().keys().hasAll(['id', 'timestamp', 'status']) &&
+        incoming().keys().hasOnly(['id', 'timestamp', 'upcomingEventsFound', 'totalRemindersSent', 'totalEmailsDispatched', 'status']) &&
+        isValidStr(incoming().id, 1, 128) &&
+        isValidTimestampStr(incoming().timestamp);
+      allow update, delete: if false;
     }
   }
 }

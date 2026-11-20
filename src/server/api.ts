@@ -1,18 +1,12 @@
 import express, { Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
-import { db } from '../lib/firebase';
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  query, 
-  where, 
-  increment 
-} from 'firebase/firestore';
-import { isCheckInWindowActive, formatTime12Hour } from '../lib/utils';
+import {
+  verifyFirebaseIdToken,
+  fsGetDoc,
+  fsListCollection,
+  fsQueryWhereEqual
+} from './firestoreRest';
+import { runNotificationCheck, getNotifierStatus } from './backgroundNotifier';
 
 export const apiRouter = express.Router();
 apiRouter.use(express.json());
@@ -22,281 +16,61 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || ''
 });
 
-// Helper to check user role from Firestore
-async function getUserRole(userId: string): Promise<{ role: string; email: string }> {
-  try {
-    const userDoc = await getDoc(doc(db, 'users', userId));
-    if (userDoc.exists()) {
-      const data = userDoc.data();
-      return { role: data.role || 'member', email: data.email || '' };
-    }
-    return { role: 'member', email: '' };
-  } catch {
-    return { role: 'member', email: '' };
-  }
+function extractBearerToken(req: Request): string {
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Bearer ')) return '';
+  return header.slice(7).trim();
 }
 
 // -------------------------------------------------------------
-// 1. SECURE QR / MANUAL ATTENDANCE VERIFICATION ENDPOINT
-// -------------------------------------------------------------
-apiRouter.post('/check-in/verify', async (req: Request, res: Response) => {
-  try {
-    const { userId, qrToken, eventId, overrideWindow } = req.body;
-
-    if (!userId || (!qrToken && !eventId)) {
-      return res.status(400).json({ error: 'Missing required check-in parameters.' });
-    }
-
-    // 1. Fetch User & Member Profile
-    const memberQuery = query(collection(db, 'members'), where('userId', '==', userId));
-    const memberSnap = await getDocs(memberQuery);
-    
-    if (memberSnap.empty) {
-      return res.status(404).json({ error: 'Member profile not found. Please complete your registration.' });
-    }
-
-    const memberDoc = memberSnap.docs[0];
-    const member = memberDoc.data();
-
-    if (member.status === 'suspended') {
-      return res.status(403).json({ error: 'Your membership is currently inactive or suspended. Please contact the church office.' });
-    }
-
-    // 2. Identify Event
-    let targetEventId = eventId;
-    let eventData: any = null;
-
-    if (qrToken) {
-      // Find event by token directly or through checkInSessions
-      const eventsSnap = await getDocs(query(collection(db, 'events'), where('qrSessionToken', '==', qrToken)));
-      if (!eventsSnap.empty) {
-        const evDoc = eventsSnap.docs[0];
-        targetEventId = evDoc.id;
-        eventData = evDoc.data();
-      } else {
-        // Check checkInSessions collection
-        const sessionSnap = await getDocs(query(collection(db, 'checkInSessions'), where('token', '==', qrToken)));
-        if (!sessionSnap.empty) {
-          const session = sessionSnap.docs[0].data();
-          if (session.status !== 'active') {
-            return res.status(400).json({ error: 'This QR check-in session has expired or is closed.' });
-          }
-          if (new Date(session.expiresAt).getTime() < Date.now()) {
-            return res.status(400).json({ error: 'This QR check-in code has expired.' });
-          }
-          targetEventId = session.eventId;
-          const evDoc = await getDoc(doc(db, 'events', targetEventId));
-          if (evDoc.exists()) {
-            eventData = evDoc.data();
-          }
-        }
-      }
-    } else if (eventId) {
-      const evDoc = await getDoc(doc(db, 'events', eventId));
-      if (evDoc.exists()) {
-        eventData = evDoc.data();
-      }
-    }
-
-    if (!eventData) {
-      return res.status(404).json({ error: 'Invalid QR code or church activity not found.' });
-    }
-
-    // 3. Validate Event Status
-    if (eventData.status === 'cancelled') {
-      return res.status(400).json({ error: 'This church activity has been cancelled.' });
-    }
-
-    // 4. Validate Check-in Window (unless admin override)
-    if (!overrideWindow) {
-      const windowCheck = isCheckInWindowActive(eventData);
-      if (!windowCheck.isOpen) {
-        return res.status(400).json({ error: windowCheck.message });
-      }
-    }
-
-    // 5. Prevent Duplicate Check-In
-    const dupQuery = query(
-      collection(db, 'attendance'),
-      where('eventId', '==', targetEventId),
-      where('memberId', '==', memberDoc.id)
-    );
-    const dupSnap = await getDocs(dupQuery);
-
-    if (!dupSnap.empty) {
-      const existing = dupSnap.docs[0].data();
-      return res.status(200).json({
-        alreadyCheckedIn: true,
-        message: "You're already checked in.",
-        checkInTime: existing.checkInTimeFormatted || formatTime12Hour(existing.checkInTime),
-        record: existing
-      });
-    }
-
-    // 6. Create Attendance Record
-    const now = new Date();
-    const attendanceId = `att_${targetEventId}_${memberDoc.id}`;
-    const formattedTime = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
-
-    const attendanceRecord = {
-      id: attendanceId,
-      eventId: targetEventId,
-      eventTitle: eventData.title,
-      eventDate: eventData.date,
-      memberId: memberDoc.id,
-      memberName: member.fullName || `${member.firstName} ${member.lastName}`,
-      membershipNumber: member.membershipNumber,
-      departmentName: member.departmentName || '',
-      groupName: member.groupName || '',
-      checkInTime: now.toISOString(),
-      checkInTimeFormatted: formattedTime,
-      method: qrToken ? 'qr' : 'manual',
-      status: 'present',
-      verifiedBy: qrToken ? 'system_qr' : (req.body.adminName || 'Admin'),
-      notes: req.body.notes || '',
-      createdAt: now.toISOString()
-    };
-
-    await setDoc(doc(db, 'attendance', attendanceId), attendanceRecord);
-
-    // Update event attendee count
-    try {
-      await updateDoc(doc(db, 'events', targetEventId), {
-        attendeesCount: increment(1)
-      });
-    } catch (e) {
-      console.warn('Could not increment attendee count:', e);
-    }
-
-    // Create Notification for the member
-    try {
-      const notifId = `notif_${Date.now()}`;
-      await setDoc(doc(db, 'notifications', notifId), {
-        id: notifId,
-        userId: userId,
-        title: 'Attendance Confirmed',
-        message: `Your attendance for "${eventData.title}" was recorded at ${formattedTime}.`,
-        type: 'attendance',
-        read: false,
-        createdAt: now.toISOString()
-      });
-    } catch (e) {
-      console.warn('Could not create notification:', e);
-    }
-
-    return res.status(200).json({
-      success: true,
-      alreadyCheckedIn: false,
-      message: 'Check-in successful!',
-      checkInTime: formattedTime,
-      record: attendanceRecord
-    });
-  } catch (error: any) {
-    console.error('Check-in error:', error);
-    return res.status(500).json({ error: 'We could not complete your check-in. Please try again.' });
-  }
-});
-
-// -------------------------------------------------------------
-// 2. ADMIN REFRESH QR CODE SESSION
-// -------------------------------------------------------------
-apiRouter.post('/events/refresh-qr', async (req: Request, res: Response) => {
-  try {
-    const { eventId, adminId, adminName } = req.body;
-    if (!eventId) {
-      return res.status(400).json({ error: 'Missing event ID' });
-    }
-
-    const { role } = await getUserRole(adminId);
-    if (role !== 'admin' && role !== 'super_admin') {
-      return res.status(403).json({ error: 'Unauthorized: Admin privileges required.' });
-    }
-
-    const newToken = `FT-${eventId.substring(0, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 60 * 60 * 1000).toISOString(); // 1 hour
-
-    await updateDoc(doc(db, 'events', eventId), {
-      qrSessionToken: newToken,
-      qrSessionExpiresAt: expiresAt,
-      updatedAt: now.toISOString()
-    });
-
-    const sessionId = `session-${eventId}`;
-    await setDoc(doc(db, 'checkInSessions', sessionId), {
-      id: sessionId,
-      eventId: eventId,
-      token: newToken,
-      expiresAt: expiresAt,
-      status: 'active',
-      openedBy: adminName || 'Admin',
-      createdAt: now.toISOString()
-    });
-
-    return res.json({ success: true, token: newToken, expiresAt });
-  } catch (err) {
-    console.error('Refresh QR error:', err);
-    return res.status(500).json({ error: 'Failed to refresh QR session.' });
-  }
-});
-
-// -------------------------------------------------------------
-// 3. AI ASSISTANT ENDPOINT (GEMINI 2.5 FLASH WITH RESTRICTED TOOLS)
+// 1. AUTHENTICATED AI ASSISTANT ENDPOINT (GEMINI 2.5 FLASH)
 // -------------------------------------------------------------
 apiRouter.post('/ai/assistant', async (req: Request, res: Response) => {
   try {
-    const { userId, prompt, chatHistory = [] } = req.body;
+    const idToken = extractBearerToken(req);
+    if (!idToken) {
+      return res.status(401).json({ reply: 'Please sign in with a verified account to use the Church Assistant.' });
+    }
 
-    if (!prompt) {
+    const tokenUser = await verifyFirebaseIdToken(idToken);
+    if (!tokenUser.emailVerified) {
+      return res.status(403).json({ reply: 'Please verify your email address before accessing the Church Assistant.' });
+    }
+
+    const { prompt, chatHistory = [] } = req.body;
+    if (!prompt || typeof prompt !== 'string') {
       return res.status(400).json({ error: 'Please provide a message or question.' });
     }
 
-    // 1. Get User Profile & Member Info
-    let memberProfile: any = null;
-    let userRole = 'member';
-    let memberDocId = '';
+    // 1. Fetch verified User Role & Member Info via Firestore REST (enforces rules)
+    const userDoc = await fsGetDoc('users', tokenUser.uid, idToken);
+    const userRole: string = userDoc?.role || 'member';
+    const accountStatus: string = userDoc?.status || 'active';
 
-    if (userId) {
-      const userDoc = await getDoc(doc(db, 'users', userId));
-      if (userDoc.exists()) {
-        userRole = userDoc.data().role || 'member';
-      }
-      const memberQuery = query(collection(db, 'members'), where('userId', '==', userId));
-      const memberSnap = await getDocs(memberQuery);
-      if (!memberSnap.empty) {
-        memberDocId = memberSnap.docs[0].id;
-        memberProfile = memberSnap.docs[0].data();
-      }
+    if (accountStatus !== 'active') {
+      return res.status(403).json({ reply: 'Your account must be active before accessing church records.' });
     }
 
-    // 2. Controlled Data Retrieval Functions based on Role
-    // Fetch upcoming events
-    const eventsSnap = await getDocs(collection(db, 'events'));
-    const eventsList = eventsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const memberMatches = await fsQueryWhereEqual('members', 'userId', tokenUser.uid, idToken);
+    const memberProfile = memberMatches[0] || null;
 
-    // Fetch member attendance records if authenticated
-    let myAttendance: any[] = [];
-    if (memberDocId) {
-      const attQuery = query(collection(db, 'attendance'), where('memberId', '==', memberDocId));
-      const attSnap = await getDocs(attQuery);
-      myAttendance = attSnap.docs.map(d => d.data());
-    }
+    // 2. Controlled Data Retrieval based strictly on Firestore-verified Role
+    const [eventsList, myAttendance] = await Promise.all([
+      fsListCollection('events', idToken),
+      fsQueryWhereEqual('attendance', 'userId', tokenUser.uid, idToken)
+    ]);
 
-    // Admin-only stats
     let totalMembersCount = 0;
-    let allAttendanceStats: any = null;
+    let totalAttendanceRecords = 0;
     if (userRole === 'admin' || userRole === 'super_admin') {
-      const allMembersSnap = await getDocs(collection(db, 'members'));
-      totalMembersCount = allMembersSnap.size;
-
-      const allAttSnap = await getDocs(collection(db, 'attendance'));
-      allAttendanceStats = {
-        totalAttendanceRecords: allAttSnap.size,
-        recentCheckIns: allAttSnap.docs.slice(0, 10).map(d => d.data())
-      };
+      const [allMembers, allAtt] = await Promise.all([
+        fsListCollection('members', idToken),
+        fsListCollection('attendance', idToken)
+      ]);
+      totalMembersCount = allMembers.length;
+      totalAttendanceRecords = allAtt.length;
     }
 
-    // Build context securely for the LLM
     const systemInstruction = `
 You are the FaithTrack Church Assistant for "FaithTrack Cathedral".
 You are warm, courteous, spiritually uplifting, clear, and very helpful.
@@ -306,7 +80,7 @@ CURRENT USER ROLE: "${userRole}"
 ${memberProfile ? `CURRENT MEMBER NAME: "${memberProfile.fullName || memberProfile.firstName}"
 MEMBERSHIP NUMBER: "${memberProfile.membershipNumber}"
 DEPARTMENT: "${memberProfile.departmentName || 'Not assigned'}"
-GROUP: "${memberProfile.groupName || 'Not assigned'}"` : 'Guest / Unregistered User'}
+GROUP: "${memberProfile.groupName || 'Not assigned'}"` : 'Verified Member'}
 
 SECURE CONTEXT DATA AVAILABLE:
 - Upcoming Events: ${JSON.stringify(eventsList.map((e: any) => ({
@@ -317,7 +91,7 @@ SECURE CONTEXT DATA AVAILABLE:
       location: e.location,
       checkInTime: `${e.checkInOpenTime} - ${e.checkInCloseTime}`
     })))}
-- Member's Attendance Records (${myAttendance.length} total): ${JSON.stringify(myAttendance.map(a => ({
+- Member's Attendance Records (${myAttendance.length} total): ${JSON.stringify(myAttendance.map((a: any) => ({
       eventTitle: a.eventTitle,
       date: a.eventDate,
       time: a.checkInTimeFormatted,
@@ -326,20 +100,20 @@ SECURE CONTEXT DATA AVAILABLE:
 ${userRole === 'admin' || userRole === 'super_admin' ? `
 - ADMIN ONLY STATS:
   Total Members: ${totalMembersCount}
-  Total Attendance Logs: ${allAttendanceStats?.totalAttendanceRecords || 0}
+  Total Attendance Logs: ${totalAttendanceRecords}
 ` : 'NOTE: Administrative church stats are restricted and not accessible for non-admin members.'}
 
 GUIDELINES:
 - Keep answers warm, friendly, concise, and easy to read.
 - If a member asks about their attendance (e.g. Digging Deep, Sunday Service, or attendance percentage), calculate it accurately from the provided attendance records.
 - If an ordinary member asks for restricted administrative stats (like total church members or financial reports), politely explain that this information is reserved for church leadership.
-- Address the user kindly with Christian warmth (e.g., "Peace be with you, John", "God bless you").
+- Address the user kindly with Christian warmth (e.g., "Peace be with you", "God bless you").
 `;
 
     const chatMessages = [
-      ...chatHistory.map((m: any) => ({
+      ...(Array.isArray(chatHistory) ? chatHistory : []).map((m: any) => ({
         role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
+        parts: [{ text: String(m.content || '') }]
       })),
       {
         role: 'user',
@@ -352,7 +126,7 @@ GUIDELINES:
       contents: chatMessages,
       config: {
         systemInstruction,
-        temperature: 0.4,
+        temperature: 0.4
       }
     });
 
@@ -367,17 +141,27 @@ GUIDELINES:
 });
 
 // -------------------------------------------------------------
-// 3. BACKGROUND NOTIFICATION & UPCOMING ACTIVITIES CHECK
+// 2. ADMIN NOTIFICATION DISPATCH & TELEMETRY
 // -------------------------------------------------------------
-import { 
-  runNotificationCheck, 
-  getNotifierStatus 
-} from './backgroundNotifier';
-
-// Manual trigger for background notification check
-apiRouter.post('/notifications/run-check', async (_req: Request, res: Response) => {
+apiRouter.post('/notifications/run-check', async (req: Request, res: Response) => {
   try {
-    const result = await runNotificationCheck();
+    const idToken = extractBearerToken(req);
+    if (!idToken) {
+      return res.status(401).json({ success: false, error: 'Authentication required.' });
+    }
+
+    const tokenUser = await verifyFirebaseIdToken(idToken);
+    if (!tokenUser.emailVerified) {
+      return res.status(403).json({ success: false, error: 'Verified email required.' });
+    }
+
+    const userDoc = await fsGetDoc('users', tokenUser.uid, idToken);
+    const role = userDoc?.role || 'member';
+    if (role !== 'admin' && role !== 'super_admin') {
+      return res.status(403).json({ success: false, error: 'Administrator privileges required.' });
+    }
+
+    const result = await runNotificationCheck(idToken);
     return res.json({ success: true, result });
   } catch (err: any) {
     console.error('Trigger check error:', err);
@@ -385,84 +169,22 @@ apiRouter.post('/notifications/run-check', async (_req: Request, res: Response) 
   }
 });
 
-// Telemetry and status of background check
-apiRouter.get('/notifications/status', (_req: Request, res: Response) => {
+apiRouter.get('/notifications/status', async (req: Request, res: Response) => {
   try {
-    const status = getNotifierStatus();
-    return res.json(status);
-  } catch (err: any) {
-    return res.status(500).json({ error: 'Failed to get status.' });
-  }
-});
-
-// Member pre-registration / RSVP for an activity
-apiRouter.post('/activities/register', async (req: Request, res: Response) => {
-  try {
-    const { eventId, memberId, userId, memberName, memberEmail, memberPhone } = req.body;
-    if (!eventId || !memberId) {
-      return res.status(400).json({ error: 'Missing eventId or memberId.' });
+    const idToken = extractBearerToken(req);
+    if (!idToken) {
+      return res.status(401).json({ error: 'Authentication required.' });
     }
 
-    const evDoc = await getDoc(doc(db, 'events', eventId));
-    if (!evDoc.exists()) {
-      return res.status(404).json({ error: 'Activity not found.' });
+    const tokenUser = await verifyFirebaseIdToken(idToken);
+    const userDoc = await fsGetDoc('users', tokenUser.uid, idToken);
+    const role = userDoc?.role || 'member';
+    if (role !== 'admin' && role !== 'super_admin') {
+      return res.status(403).json({ error: 'Administrator privileges required.' });
     }
-    const event = evDoc.data();
 
-    const regId = `reg_${eventId}_${memberId}`;
-    const registration = {
-      id: regId,
-      eventId,
-      eventTitle: event.title,
-      eventDate: event.date,
-      eventStartTime: event.startTime,
-      eventLocation: event.location,
-      memberId,
-      userId: userId || memberId,
-      memberName: memberName || 'Church Member',
-      memberEmail: memberEmail || '',
-      memberPhone: memberPhone || '',
-      status: 'confirmed',
-      reminderSent: false,
-      registeredAt: new Date().toISOString()
-    };
-
-    await setDoc(doc(db, 'activity_registrations', regId), registration);
-    return res.json({ success: true, registration });
+    return res.json(getNotifierStatus());
   } catch (err: any) {
-    console.error('Register activity error:', err);
-    return res.status(500).json({ error: err.message || 'Could not register for activity.' });
-  }
-});
-
-// Cancel registration / RSVP
-apiRouter.post('/activities/unregister', async (req: Request, res: Response) => {
-  try {
-    const { eventId, memberId } = req.body;
-    if (!eventId || !memberId) {
-      return res.status(400).json({ error: 'Missing eventId or memberId.' });
-    }
-    const regId = `reg_${eventId}_${memberId}`;
-    await updateDoc(doc(db, 'activity_registrations', regId), {
-      status: 'cancelled',
-      cancelledAt: new Date().toISOString()
-    });
-    return res.json({ success: true, message: 'Registration cancelled.' });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Could not cancel registration.' });
-  }
-});
-
-// Get member's active registrations
-apiRouter.get('/activities/registrations/:memberId', async (req: Request, res: Response) => {
-  try {
-    const { memberId } = req.params;
-    const snap = await getDocs(
-      query(collection(db, 'activity_registrations'), where('memberId', '==', memberId), where('status', '==', 'confirmed'))
-    );
-    const list = snap.docs.map(d => d.data());
-    return res.json({ registrations: list });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message || 'Could not fetch registrations.' });
+    return res.status(401).json({ error: err?.message || 'Unauthorized.' });
   }
 });

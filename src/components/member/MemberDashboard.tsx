@@ -53,11 +53,11 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
 
   const fetchData = async () => {
     try {
-      const cacheKey = `dashboard_data_${member?.id || 'guest'}`;
+      const cacheKey = `dashboard_data_${firebaseUser?.uid || member?.id || 'guest'}`;
       await staleWhileRevalidate(cacheKey, async () => {
         const eventsPromise = getDocs(query(collection(db, 'events')));
-        const attPromise = member?.id 
-          ? getDocs(query(collection(db, 'attendance'), where('memberId', '==', member.id)))
+        const attPromise = firebaseUser?.uid
+          ? getDocs(query(collection(db, 'attendance'), where('userId', '==', firebaseUser.uid)))
           : Promise.resolve({ docs: [] } as any);
         const annPromise = getDocs(query(collection(db, 'announcements'), limit(3)));
 
@@ -92,7 +92,7 @@ export const MemberDashboard: React.FC<MemberDashboardProps> = ({
 
   useEffect(() => {
     fetchData();
-  }, [member?.id]);
+  }, [firebaseUser?.uid, member?.id]);
 
   const greeting = getRelativeGreeting();
   const firstName = member?.firstName || 'Beloved';

@@ -8,6 +8,7 @@ import {
   updateDoc, 
   deleteDoc, 
   query, 
+  where,
   arrayUnion, 
   arrayRemove, 
   increment 
@@ -98,9 +99,29 @@ export const PrayerWallView: React.FC = () => {
 
   const fetchPrayers = async () => {
     try {
-      await staleWhileRevalidate('prayer_wall_requests', async () => {
-        const snap = await getDocs(collection(db, 'prayer_requests'));
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as PrayerRequest));
+      const cacheKey = `prayer_wall_requests_${isAdmin ? 'admin' : currentUserId}`;
+      await staleWhileRevalidate(cacheKey, async () => {
+        if (isAdmin) {
+          const snap = await getDocs(collection(db, 'prayer_requests'));
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as PrayerRequest));
+          list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+          return list;
+        }
+
+        // Non-admin members only query public prayers and their own confidential prayers
+        const publicPromise = getDocs(
+          query(collection(db, 'prayer_requests'), where('isConfidentialToPastors', '==', false))
+        );
+        const ownPromise = firebaseUser?.uid
+          ? getDocs(query(collection(db, 'prayer_requests'), where('authorId', '==', firebaseUser.uid)))
+          : Promise.resolve({ docs: [] } as any);
+
+        const [publicSnap, ownSnap] = await Promise.all([publicPromise, ownPromise]);
+        const merged = new Map<string, PrayerRequest>();
+        publicSnap.docs.forEach((d: any) => merged.set(d.id, { id: d.id, ...d.data() } as PrayerRequest));
+        ownSnap.docs.forEach((d: any) => merged.set(d.id, { id: d.id, ...d.data() } as PrayerRequest));
+
+        const list = Array.from(merged.values());
         list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
         return list;
       }, (data, fromCache) => {
@@ -116,7 +137,7 @@ export const PrayerWallView: React.FC = () => {
 
   useEffect(() => {
     fetchPrayers();
-  }, []);
+  }, [isAdmin, currentUserId]);
 
   const showBanner = (msg: string) => {
     setBannerMessage(msg);
@@ -188,7 +209,7 @@ export const PrayerWallView: React.FC = () => {
         category,
         authorId: currentUserId,
         authorName: isAnonymous ? 'Anonymous Believer' : currentUserName,
-        authorMemberNumber: isAnonymous ? undefined : member?.membershipNumber,
+        ...(!isAnonymous && member?.membershipNumber ? { authorMemberNumber: member.membershipNumber } : {}),
         isAnonymous,
         isConfidentialToPastors,
         status: 'active',

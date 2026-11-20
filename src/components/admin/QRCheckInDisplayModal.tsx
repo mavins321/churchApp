@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
+import { doc, updateDoc, setDoc } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 import { ChurchEvent } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
 import { 
@@ -64,20 +66,29 @@ export const QRCheckInDisplayModal: React.FC<QRCheckInDisplayModalProps> = ({
     if (!event?.id) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/events/refresh-qr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventId: event.id,
-          adminId: firebaseUser?.uid,
-          adminName: userProfile?.displayName || 'Church Admin'
-        })
+      const newToken = `FT-${event.id.substring(0, 4).toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+
+      await updateDoc(doc(db, 'events', event.id), {
+        qrSessionToken: newToken,
+        qrSessionExpiresAt: expiresAt,
+        updatedAt: now.toISOString()
       });
-      const data = await res.json();
-      if (res.ok && data.token) {
-        setToken(data.token);
-        if (onRefreshSuccess) onRefreshSuccess();
-      }
+
+      const sessionId = `session-${event.id}`;
+      await setDoc(doc(db, 'checkInSessions', sessionId), {
+        id: sessionId,
+        eventId: event.id,
+        token: newToken,
+        expiresAt,
+        status: 'active',
+        openedBy: userProfile?.displayName || 'Church Admin',
+        createdAt: now.toISOString()
+      });
+
+      setToken(newToken);
+      if (onRefreshSuccess) onRefreshSuccess();
     } catch (e) {
       console.error('Refresh error:', e);
     } finally {
