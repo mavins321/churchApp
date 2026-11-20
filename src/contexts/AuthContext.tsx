@@ -26,7 +26,6 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<void>;
   updateMemberProfile: (updates: Partial<Member>) => Promise<void>;
   refreshProfile: () => Promise<void>;
-  switchRoleForDemo: (role: UserRole) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -40,7 +39,7 @@ const CACHE_ROLE_KEY = 'faithtrack_cache_role';
 export const isEmailAdmin = (email?: string): boolean => {
   if (!email) return false;
   const clean = email.toLowerCase().trim();
-  return clean === 'mavinsmayer@gmail.com' || clean.includes('admin') || clean.includes('pastor');
+  return clean === 'mavinsmayer@gmail.com';
 };
 
 // Instant hydration from local cache so the portal opens in <0.1s
@@ -56,7 +55,7 @@ const getInitialSession = () => {
       const memberData = memberStr ? JSON.parse(memberStr) : null;
       const resolvedRole: UserRole = isEmailAdmin(profile.email)
         ? 'admin'
-        : ((roleStr as UserRole) || profile.role || 'member');
+        : (profile.role || (roleStr as UserRole) || 'member');
 
       return {
         user: { uid, email: profile.email, displayName: profile.displayName },
@@ -424,8 +423,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     }
 
-    // Determine initial role (admin demo email gets admin role)
-    const assignedRole: UserRole = cleanEmail.includes('admin') ? 'admin' : 'member';
+    // Determine initial role (authorized admin email gets admin role; all others default to member)
+    const assignedRole: UserRole = isEmailAdmin(cleanEmail) ? 'admin' : 'member';
 
     // Resolve departmentId and groupId if available
     const resolvedDeptId = departmentId || INITIAL_DEPARTMENTS.find(d => d.name === departmentName)?.id || '';
@@ -602,26 +601,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const switchRoleForDemo = async (newRole: UserRole) => {
-    setRole(newRole);
-    try {
-      localStorage.setItem(CACHE_ROLE_KEY, newRole);
-      if (userProfile) {
-        const updated = { ...userProfile, role: newRole };
-        setUserProfile(updated);
-        localStorage.setItem(CACHE_PROFILE_KEY, JSON.stringify(updated));
-      }
-      if (firebaseUser?.uid) {
-        await updateDoc(doc(db, 'users', firebaseUser.uid), {
-          role: newRole,
-          updatedAt: new Date().toISOString()
-        });
-      }
-    } catch (e) {
-      console.warn('Role switch state sync:', e);
-    }
-  };
-
   return (
     <AuthContext.Provider
       value={{
@@ -635,8 +614,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signOut,
         resetPassword,
         updateMemberProfile,
-        refreshProfile,
-        switchRoleForDemo
+        refreshProfile
       }}
     >
       {children}

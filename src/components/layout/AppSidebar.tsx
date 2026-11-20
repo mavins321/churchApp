@@ -15,7 +15,6 @@ import {
   CreditCard,
   Sparkles,
   ShieldCheck,
-  ArrowRightLeft,
   X,
   Church,
   Heart
@@ -26,6 +25,8 @@ import { useAuth } from '../../contexts/AuthContext';
 interface AppSidebarProps {
   currentTab: string;
   onSelectTab: (tab: string) => void;
+  portalView: 'admin' | 'member';
+  onSwitchPortalView: (view: 'admin' | 'member') => void;
   unreadNotificationsCount?: number;
   onOpenDigitalCard?: () => void;
   onOpenAIAssistant?: () => void;
@@ -44,14 +45,17 @@ interface NavItem {
 export const AppSidebar: React.FC<AppSidebarProps> = ({
   currentTab,
   onSelectTab,
+  portalView,
+  onSwitchPortalView,
   unreadNotificationsCount = 0,
   onOpenDigitalCard,
   onOpenAIAssistant,
   isMobileOpen = false,
   onCloseMobile
 }) => {
-  const { role, member, userProfile, switchRoleForDemo } = useAuth();
+  const { role, member, userProfile } = useAuth();
   const isAdminRole = role === 'admin' || role === 'super_admin';
+  const showAdminMenu = isAdminRole && portalView === 'admin';
 
   const memberNavItems: NavItem[] = [
     { id: 'home', label: 'Overview', icon: Home, description: 'Dashboard & Next Service' },
@@ -114,11 +118,11 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           )}
         </div>
 
-        {/* Portal Context Banner & Quick Switcher */}
+        {/* Portal Context Banner & Admin View Switcher */}
         <div className="p-3 bg-gradient-to-br from-emerald-50 to-teal-50/70 border border-emerald-200/80 rounded-2xl space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-              {isAdminRole ? 'Church Administration' : 'Congregation Portal'}
+              {showAdminMenu ? 'Church Administration' : 'Congregation Portal'}
             </span>
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
               {isAdminRole ? 'Admin' : 'Member'}
@@ -128,44 +132,47 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             {member?.fullName || userProfile?.displayName || 'FaithTrack Cathedral'}
           </p>
 
-          <div className="flex items-center gap-1 p-0.5 bg-white/90 rounded-xl border border-emerald-200/70 text-xs">
-            <button
-              onClick={() => {
-                switchRoleForDemo('member');
-                handleItemClick('home');
-              }}
-              className={`flex-1 py-1 px-2 rounded-lg font-bold text-center transition-all ${
-                !isAdminRole
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Member
-            </button>
-            <button
-              onClick={() => {
-                switchRoleForDemo('admin');
-                handleItemClick('admin-dashboard');
-              }}
-              className={`flex-1 py-1 px-2 rounded-lg font-bold text-center transition-all flex items-center justify-center gap-1 ${
-                isAdminRole
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Admin</span>
-            </button>
-          </div>
+          {/* Portal view switcher only visible to Administrators */}
+          {isAdminRole && (
+            <div className="flex items-center gap-1 p-0.5 bg-white/90 rounded-xl border border-emerald-200/70 text-xs">
+              <button
+                onClick={() => {
+                  onSwitchPortalView('member');
+                  if (onCloseMobile) onCloseMobile();
+                }}
+                className={`flex-1 py-1 px-2 rounded-lg font-bold text-center transition-all ${
+                  portalView === 'member'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Member
+              </button>
+              <button
+                onClick={() => {
+                  onSwitchPortalView('admin');
+                  if (onCloseMobile) onCloseMobile();
+                }}
+                className={`flex-1 py-1 px-2 rounded-lg font-bold text-center transition-all flex items-center justify-center gap-1 ${
+                  portalView === 'admin'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Admin</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Navigation Sections */}
         <div className="space-y-1">
           <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-3 py-1">
-            {isAdminRole ? 'Church Operations' : 'Main Menu'}
+            {showAdminMenu ? 'Church Operations' : 'Main Menu'}
           </p>
           <nav className="space-y-1">
-            {(isAdminRole ? adminNavItems : memberNavItems).map((item) => {
+            {(showAdminMenu ? adminNavItems : memberNavItems).map((item) => {
               const Icon = item.icon;
               const isActive = currentTab === item.id;
               return (
@@ -198,8 +205,8 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           </nav>
         </div>
 
-        {/* Member-specific quick actions */}
-        {!isAdminRole && onOpenDigitalCard && (
+        {/* Member-specific quick actions (shown to members and admins browsing member view) */}
+        {(!isAdminRole || portalView === 'member') && onOpenDigitalCard && (
           <div className="pt-2">
             <button
               onClick={() => {
@@ -229,27 +236,6 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             </button>
           </div>
         )}
-      </div>
-
-      {/* Footer Role Switcher / Demo Controls */}
-      <div className="pt-4 border-t border-slate-100 space-y-2">
-        <div className="px-2">
-          <button
-            onClick={() => {
-              if (isAdminRole) {
-                switchRoleForDemo('member');
-                handleItemClick('home');
-              } else {
-                switchRoleForDemo('admin');
-                handleItemClick('admin-dashboard');
-              }
-            }}
-            className="w-full flex items-center justify-center gap-2 p-2 rounded-xl text-xs font-semibold text-slate-500 hover:text-emerald-700 hover:bg-slate-50 border border-slate-200/70 transition-colors"
-          >
-            <ArrowRightLeft className="w-3.5 h-3.5" />
-            <span>{isAdminRole ? 'Switch to Member View' : 'Switch to Admin View'}</span>
-          </button>
-        </div>
       </div>
     </div>
   );

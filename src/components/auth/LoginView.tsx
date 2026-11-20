@@ -4,14 +4,14 @@ import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
-import { Mail, Lock, Eye, EyeOff, Church, ShieldCheck, UserCheck } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, Church } from 'lucide-react';
 
 interface LoginViewProps {
   onSwitchToRegister: () => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onSwitchToRegister }) => {
-  const { signIn, signUp } = useAuth();
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -46,44 +46,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSwitchToRegister }) => {
     }
   };
 
-  // Quick Demo Access for instant testing
-  const handleQuickDemo = async (role: 'member' | 'admin') => {
-    setError('');
-    setLoading(true);
-    const demoEmail = role === 'admin' ? 'admin@faithtrack.church' : 'john.adebayo@faithtrack.church';
-    const demoPass = 'FaithTrack2026!';
-
-    try {
-      // Try login first
-      await signIn(demoEmail, demoPass);
-    } catch {
-      // If not yet created in this Firebase project, auto-register demo account
-      try {
-        await signUp({
-          email: demoEmail,
-          password: demoPass,
-          firstName: role === 'admin' ? 'Pastor' : 'John',
-          lastName: role === 'admin' ? 'Administrator' : 'Adebayo',
-          phone: '+234 802 345 6789',
-          gender: 'Male',
-          dateOfBirth: '1990-05-14',
-          address: '14 Grace Cathedral Way',
-          city: 'Ikeja',
-          state: 'Lagos',
-          country: 'Nigeria',
-          departmentName: role === 'admin' ? 'Pastoral & Admin' : 'Choir & Worship',
-          groupName: 'Grace Cell Fellowship',
-          emergencyName: 'Mary Adebayo',
-          emergencyPhone: '+234 803 987 6543'
-        });
-      } catch (regErr: any) {
-        setError(regErr.message || 'Could not launch demo account. Please try manual registration.');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="min-h-[85vh] flex items-center justify-center px-4 py-8">
       <Card className="w-full max-w-md p-6 sm:p-8 border-slate-200/80 shadow-lg">
@@ -101,43 +63,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSwitchToRegister }) => {
           </p>
         </div>
 
-        {/* Demo Fast Login Bar */}
-        <div className="mb-6 p-3 bg-slate-50 rounded-2xl border border-slate-200/70">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 text-center">
-            Instant Demo Sign In
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              icon={<UserCheck className="w-4 h-4 text-emerald-600" />}
-              onClick={() => handleQuickDemo('member')}
-              disabled={loading}
-              className="text-xs py-2"
-            >
-              Member Demo
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              icon={<ShieldCheck className="w-4 h-4 text-slate-700" />}
-              onClick={() => handleQuickDemo('admin')}
-              disabled={loading}
-              className="text-xs py-2"
-            >
-              Admin Demo
-            </Button>
-          </div>
-        </div>
-
-        <div className="relative flex py-2 items-center mb-4">
-          <div className="flex-grow border-t border-slate-200"></div>
-          <span className="shrink mx-3 text-xs text-slate-400 font-medium">or continue with email</span>
-          <div className="flex-grow border-t border-slate-200"></div>
-        </div>
-
         {/* Error Alert */}
         {error && (
           <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs font-medium text-rose-700 flex items-start gap-2">
@@ -151,7 +76,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onSwitchToRegister }) => {
           <Input
             label="Email Address"
             type="email"
-            placeholder="e.g. john.adebayo@faithtrack.church"
+            placeholder="e.g. name@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             leftIcon={<Mail className="w-4 h-4" />}

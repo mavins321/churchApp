@@ -42,21 +42,76 @@ const ViewFallback = () => (
 );
 
 const MainApp: React.FC = () => {
-  const { firebaseUser, role, loading, member, switchRoleForDemo } = useAuth();
+  const { firebaseUser, role, loading, member } = useAuth();
+  const isAdminRole = role === 'admin' || role === 'super_admin';
+
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [justRegistered, setJustRegistered] = useState(false);
-  const [currentTab, setCurrentTab] = useState<string>('home');
+  const [portalView, setPortalView] = useState<'admin' | 'member'>(() => (isAdminRole ? 'admin' : 'member'));
+  const [currentTab, setCurrentTab] = useState<string>(() => (isAdminRole ? 'admin-dashboard' : 'home'));
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isDigitalCardOpen, setIsDigitalCardOpen] = useState(false);
+  const initializedAdminUidRef = React.useRef<string | null>(
+    firebaseUser && isAdminRole ? firebaseUser.uid : null
+  );
 
-  // Seamlessly activate admin privileges when an admin tab is selected
+  // Keep portalView & currentTab synchronized with actual user role
   useEffect(() => {
-    if (currentTab.startsWith('admin-') && role !== 'admin' && role !== 'super_admin') {
-      switchRoleForDemo('admin');
+    if (!firebaseUser) {
+      initializedAdminUidRef.current = null;
+      setPortalView('member');
+      setCurrentTab('home');
+      return;
     }
-  }, [currentTab, role]);
+
+    if (isAdminRole) {
+      if (initializedAdminUidRef.current !== firebaseUser.uid) {
+        initializedAdminUidRef.current = firebaseUser.uid;
+        setPortalView('admin');
+        setCurrentTab('admin-dashboard');
+      }
+    } else {
+      initializedAdminUidRef.current = null;
+      setPortalView('member');
+      if (currentTab.startsWith('admin-')) {
+        setCurrentTab('home');
+      }
+    }
+  }, [firebaseUser?.uid, isAdminRole]);
+
+  // Extra guard: never allow non-admin users on admin-* routes
+  useEffect(() => {
+    if (!isAdminRole && currentTab.startsWith('admin-')) {
+      setPortalView('member');
+      setCurrentTab('home');
+    }
+  }, [isAdminRole, currentTab]);
+
+  const handleSelectTab = (tab: string) => {
+    if (tab.startsWith('admin-') && !isAdminRole) {
+      setPortalView('member');
+      setCurrentTab('home');
+      return;
+    }
+    if (tab.startsWith('admin-') && isAdminRole) {
+      setPortalView('admin');
+    } else if (['home', 'activities', 'attendance', 'notifications', 'profile', 'announcements'].includes(tab)) {
+      setPortalView('member');
+    }
+    setCurrentTab(tab);
+  };
+
+  const handleSwitchPortalView = (view: 'admin' | 'member') => {
+    if (!isAdminRole) {
+      setPortalView('member');
+      setCurrentTab('home');
+      return;
+    }
+    setPortalView(view);
+    setCurrentTab(view === 'admin' ? 'admin-dashboard' : 'home');
+  };
 
   // Fetch unread notifications count in background
   useEffect(() => {
@@ -118,14 +173,14 @@ const MainApp: React.FC = () => {
     );
   }
 
-  const isAdminRole = role === 'admin' || role === 'super_admin';
-
   return (
     <div className="min-h-screen bg-slate-50/70 text-slate-900 flex flex-col font-sans antialiased">
       {/* Top Navbar */}
       <Navbar
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={handleSelectTab}
+        portalView={isAdminRole ? portalView : 'member'}
+        onSwitchPortalView={handleSwitchPortalView}
         unreadNotificationsCount={unreadNotifsCount}
         onOpenAIAssistant={() => setIsAIOpen(true)}
         onToggleMobileNav={() => setIsMobileNavOpen(prev => !prev)}
@@ -135,7 +190,9 @@ const MainApp: React.FC = () => {
         {/* Unified Responsive Web Sidebar for Desktop, Tablet, and Mobile */}
         <AppSidebar
           currentTab={currentTab}
-          onSelectTab={setCurrentTab}
+          onSelectTab={handleSelectTab}
+          portalView={isAdminRole ? portalView : 'member'}
+          onSwitchPortalView={handleSwitchPortalView}
           unreadNotificationsCount={unreadNotifsCount}
           onOpenDigitalCard={() => setIsDigitalCardOpen(true)}
           onOpenAIAssistant={() => setIsAIOpen(true)}
@@ -146,35 +203,35 @@ const MainApp: React.FC = () => {
         {/* Main Content Area with Lazy Loading Suspense */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 min-w-0">
           <Suspense fallback={<ViewFallback />}>
-            {/* Member View Routes */}
+            {/* Member View Routes (accessible to members and admins) */}
             {currentTab === 'home' && (
               <MemberDashboard
-                onSelectTab={setCurrentTab}
+                onSelectTab={handleSelectTab}
                 onOpenAIAssistant={() => setIsAIOpen(true)}
               />
             )}
             {currentTab === 'activities' && <ActivitiesView />}
             {currentTab === 'prayers' && <PrayerWallView />}
-            {currentTab === 'attendance' && <AttendanceView onSelectTab={setCurrentTab} />}
+            {currentTab === 'attendance' && <AttendanceView onSelectTab={handleSelectTab} />}
             {currentTab === 'notifications' && <NotificationsView />}
             {currentTab === 'profile' && <ProfileView />}
             {currentTab === 'announcements' && <AnnouncementsView />}
 
-            {/* Admin View Routes */}
-            {currentTab === 'admin-dashboard' && (
+            {/* Admin View Routes (strictly restricted to Admin & Super Admin roles) */}
+            {isAdminRole && currentTab === 'admin-dashboard' && (
               <AdminDashboard
-                onSelectTab={setCurrentTab}
+                onSelectTab={handleSelectTab}
                 onOpenAIAssistant={() => setIsAIOpen(true)}
               />
             )}
-            {currentTab === 'admin-members' && <MembersManagement />}
-            {currentTab === 'admin-events' && <EventsManagement />}
-            {currentTab === 'admin-attendance' && <AttendanceManagement />}
-            {currentTab === 'admin-departments' && <DepartmentsManagement />}
-            {currentTab === 'admin-groups' && <GroupsManagement />}
-            {currentTab === 'admin-announcements' && <AnnouncementsManagement />}
-            {currentTab === 'admin-reports' && <ReportsManagement />}
-            {currentTab === 'admin-settings' && <SettingsManagement />}
+            {isAdminRole && currentTab === 'admin-members' && <MembersManagement />}
+            {isAdminRole && currentTab === 'admin-events' && <EventsManagement />}
+            {isAdminRole && currentTab === 'admin-attendance' && <AttendanceManagement />}
+            {isAdminRole && currentTab === 'admin-departments' && <DepartmentsManagement />}
+            {isAdminRole && currentTab === 'admin-groups' && <GroupsManagement />}
+            {isAdminRole && currentTab === 'admin-announcements' && <AnnouncementsManagement />}
+            {isAdminRole && currentTab === 'admin-reports' && <ReportsManagement />}
+            {isAdminRole && currentTab === 'admin-settings' && <SettingsManagement />}
           </Suspense>
         </main>
       </div>

@@ -16,6 +16,8 @@ import {
 interface NavbarProps {
   currentTab: string;
   onSelectTab: (tab: string) => void;
+  portalView: 'admin' | 'member';
+  onSwitchPortalView: (view: 'admin' | 'member') => void;
   unreadNotificationsCount?: number;
   onOpenAIAssistant: () => void;
   onToggleMobileNav?: () => void;
@@ -24,11 +26,14 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   currentTab,
   onSelectTab,
+  portalView,
+  onSwitchPortalView,
   unreadNotificationsCount = 0,
   onOpenAIAssistant,
   onToggleMobileNav
 }) => {
-  const { member, userProfile, role, signOut, switchRoleForDemo } = useAuth();
+  const { member, userProfile, role, signOut } = useAuth();
+  const isAdminRole = role === 'admin' || role === 'super_admin';
   const displayName = member?.fullName || userProfile?.displayName || 'Beloved';
 
   return (
@@ -47,7 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           <div 
-            onClick={() => onSelectTab(role === 'admin' || role === 'super_admin' ? 'admin-dashboard' : 'home')}
+            onClick={() => onSelectTab(isAdminRole && portalView === 'admin' ? 'admin-dashboard' : 'home')}
             className="flex items-center gap-3 cursor-pointer group"
           >
             <div className="w-10 h-10 rounded-2xl bg-emerald-600 flex items-center justify-center text-white shadow-sm group-hover:bg-emerald-700 transition-colors">
@@ -57,7 +62,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex items-center gap-1.5">
                 <span className="font-black text-lg tracking-tight text-slate-900">FAITHTRACK</span>
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 uppercase">
-                  {role === 'admin' || role === 'super_admin' ? 'Admin' : 'Cathedral'}
+                  {isAdminRole ? (portalView === 'admin' ? 'Admin' : 'Member View') : 'Cathedral'}
                 </span>
               </div>
               <p className="text-[11px] font-medium text-slate-500 hidden sm:block">FaithTrack Cathedral</p>
@@ -77,36 +82,32 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>AI Assistant</span>
           </button>
 
-          {/* Role Switcher for instant access to Member and Admin portals */}
-          <div className="flex items-center border border-slate-200 rounded-xl p-0.5 bg-slate-100/80 text-xs shadow-xs">
-            <button
-              onClick={() => {
-                switchRoleForDemo('member');
-                onSelectTab('home');
-              }}
-              className={`px-2 sm:px-2.5 py-1 rounded-lg font-bold transition-all text-[11px] sm:text-xs ${
-                role === 'member'
-                  ? 'bg-white text-emerald-800 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              Member
-            </button>
-            <button
-              onClick={() => {
-                switchRoleForDemo('admin');
-                onSelectTab('admin-dashboard');
-              }}
-              className={`px-2 sm:px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 text-[11px] sm:text-xs ${
-                role === 'admin' || role === 'super_admin'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Admin</span>
-            </button>
-          </div>
+          {/* Portal View Switcher — Visible ONLY to Admins */}
+          {isAdminRole && (
+            <div className="flex items-center border border-slate-200 rounded-xl p-0.5 bg-slate-100/80 text-xs shadow-xs">
+              <button
+                onClick={() => onSwitchPortalView('member')}
+                className={`px-2 sm:px-2.5 py-1 rounded-lg font-bold transition-all text-[11px] sm:text-xs ${
+                  portalView === 'member'
+                    ? 'bg-white text-emerald-800 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                Member
+              </button>
+              <button
+                onClick={() => onSwitchPortalView('admin')}
+                className={`px-2 sm:px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 text-[11px] sm:text-xs ${
+                  portalView === 'admin'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Admin</span>
+              </button>
+            </div>
+          )}
 
           {/* Notifications Bell */}
           <button
@@ -125,7 +126,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Member Profile Avatar / Sign Out */}
           <div className="flex items-center gap-2 pl-1 border-l border-slate-200/80">
             <button
-              onClick={() => onSelectTab(role === 'admin' || role === 'super_admin' ? 'admin-settings' : 'profile')}
+              onClick={() => onSelectTab(isAdminRole && portalView === 'admin' ? 'admin-settings' : 'profile')}
               className="flex items-center gap-2 p-1 rounded-2xl hover:bg-slate-50 transition-colors text-left"
             >
               <Avatar name={displayName} photoUrl={member?.photoUrl} size="sm" />

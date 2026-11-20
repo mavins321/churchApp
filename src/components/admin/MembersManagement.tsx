@@ -9,7 +9,8 @@ import {
   setDoc,
   deleteDoc 
 } from 'firebase/firestore';
-import { Member } from '../../types';
+import { Member, UserRole } from '../../types';
+import { useAuth, isEmailAdmin } from '../../contexts/AuthContext';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -23,27 +24,35 @@ import {
   Edit, 
   Trash2, 
   ShieldCheck, 
+  ShieldOff,
   Phone, 
   Mail, 
   MapPin, 
   Check, 
+  UserCheck,
   UserX, 
   Search,
   Filter,
   Eye,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  AlertCircle
 } from 'lucide-react';
 import { generateMembershipNumber } from '../../lib/utils';
 import { INITIAL_DEPARTMENTS, INITIAL_GROUPS } from '../../lib/seedData';
 import { MembersManagementSkeleton } from '../ui/Skeleton';
 
 export const MembersManagement: React.FC = () => {
+  const { firebaseUser } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
+  const [userRoles, setUserRoles] = useState<Record<string, UserRole>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDept, setSelectedDept] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [roleConfirmTarget, setRoleConfirmTarget] = useState<{ member: Member; nextRole: UserRole } | null>(null);
+  const [updatingRole, setUpdatingRole] = useState(false);
 
   // Modals
   const [isAddEditModalOpen, setIsAddEditModalOpen] = useState(false);
@@ -76,10 +85,21 @@ export const MembersManagement: React.FC = () => {
 
   const fetchMembers = async () => {
     try {
-      const snap = await getDocs(collection(db, 'members'));
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Member));
+      const [membersSnap, usersSnap] = await Promise.all([
+        getDocs(collection(db, 'members')),
+        getDocs(collection(db, 'users'))
+      ]);
+      const list = membersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Member));
       list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
       setMembers(list);
+
+      const rolesMap: Record<string, UserRole> = {};
+      usersSnap.docs.forEach(d => {
+        const data = d.data();
+        const email = data.email || '';
+        rolesMap[d.id] = isEmailAdmin(email) ? 'admin' : ((data.role as UserRole) || 'member');
+      });
+      setUserRoles(rolesMap);
     } catch (err) {
       console.error('Error fetching members:', err);
     } finally {
@@ -136,13 +156,75 @@ export const MembersManagement: React.FC = () => {
     setIsAddEditModalOpen(true);
   };
 
+  const showFeedback = (type: 'success' | 'error', message: string) => {
+    setActionFeedback({ type, message });
+    setTimeout(() => setActionFeedback(null), 5000);
+  };
+
   const handleToggleStatus = async (m: Member) => {
     const nextStatus = m.status === 'active' ? 'suspended' : 'active';
     try {
       await updateDoc(doc(db, 'members', m.id), { status: nextStatus, updatedAt: new Date().toISOString() });
       setMembers(prev => prev.map(item => item.id === m.id ? { ...item, status: nextStatus } : item));
+      showFeedback(
+        'success',
+        nextStatus === 'active'
+          ? `${m.fullName} has been approved & activated.`
+          : `${m.fullName} has been suspended.`
+      );
     } catch (e) {
       console.error('Failed to change status:', e);
+      showFeedback('error', 'Failed to update member status.');
+    }
+  };
+
+  const getMemberPortalRole = (m: Member): UserRole | null => {
+    if (isEmailAdmin(m.email)) return 'admin';
+    if (m.userId && userRoles[m.userId]) return userRoles[m.userId];
+    return null;
+  };
+
+  const handleConfirmRoleChange = async () => {
+    if (!roleConfirmTarget) return;
+    const { member: target, nextRole } = roleConfirmTarget;
+
+    if (!target.userId || !userRoles[target.userId]) {
+      showFeedback('error', `${target.fullName} does not have a registered login account yet. They must register first before being granted Admin access.`);
+      setRoleConfirmTarget(null);
+      return;
+    }
+
+    if (isEmailAdmin(target.email) && nextRole === 'member') {
+      showFeedback('error', 'The primary church administrator account cannot be demoted.');
+      setRoleConfirmTarget(null);
+      return;
+    }
+
+    if (target.userId === firebaseUser?.uid && nextRole === 'member') {
+      showFeedback('error', 'You cannot remove your own Admin privileges while signed in.');
+      setRoleConfirmTarget(null);
+      return;
+    }
+
+    setUpdatingRole(true);
+    try {
+      await updateDoc(doc(db, 'users', target.userId), {
+        role: nextRole,
+        updatedAt: new Date().toISOString()
+      });
+      setUserRoles(prev => ({ ...prev, [target.userId]: nextRole }));
+      showFeedback(
+        'success',
+        nextRole === 'admin'
+          ? `${target.fullName} has been promoted to Admin.`
+          : `${target.fullName} has been changed back to Member.`
+      );
+      setRoleConfirmTarget(null);
+    } catch (err) {
+      console.error('Failed to update user role:', err);
+      showFeedback('error', 'Failed to update user role in database.');
+    } finally {
+      setUpdatingRole(false);
     }
   };
 
@@ -223,7 +305,7 @@ export const MembersManagement: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">Member Management</h1>
-          <p className="text-xs text-slate-500">View, add, update, and manage church members ({members.length} total)</p>
+          <p className="text-xs text-slate-500">Approve members, manage access roles (Member / Admin), and update directory ({members.length} total)</p>
         </div>
 
         <Button
@@ -236,6 +318,23 @@ export const MembersManagement: React.FC = () => {
           Add New Member
         </Button>
       </div>
+
+      {actionFeedback && (
+        <div
+          className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center gap-2 ${
+            actionFeedback.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          {actionFeedback.type === 'success' ? (
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+          ) : (
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          )}
+          <span>{actionFeedback.message}</span>
+        </div>
+      )}
 
       {/* Filter and Search Controls */}
       <Card className="p-4 bg-white border-slate-200/80 space-y-3">
@@ -281,20 +380,24 @@ export const MembersManagement: React.FC = () => {
 
       {/* DESKTOP & TABLET TABLE */}
       <div className="hidden md:block bg-white rounded-3xl border border-slate-200/80 overflow-x-auto shadow-xs">
-        <table className="w-full min-w-[700px] text-left text-xs">
+        <table className="w-full min-w-[780px] text-left text-xs">
           <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
             <tr>
               <th className="px-5 py-3.5">Member</th>
               <th className="px-4 py-3.5">Membership ID</th>
               <th className="px-4 py-3.5">Department</th>
-              <th className="px-4 py-3.5">Phone</th>
+              <th className="px-4 py-3.5">Portal Role</th>
               <th className="px-4 py-3.5">Status</th>
               <th className="px-4 py-3.5">Joined</th>
               <th className="px-5 py-3.5 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {paginatedMembers.map((m) => (
+            {paginatedMembers.map((m) => {
+              const portalRole = getMemberPortalRole(m);
+              const isMemberAdmin = portalRole === 'admin' || portalRole === 'super_admin';
+              const isProtectedAdmin = isEmailAdmin(m.email) || m.userId === firebaseUser?.uid;
+              return (
               <tr key={m.id} className="hover:bg-slate-50/70 transition-colors">
                 <td className="px-5 py-3.5">
                   <div className="flex items-center gap-3">
@@ -311,8 +414,14 @@ export const MembersManagement: React.FC = () => {
                 <td className="px-4 py-3.5 text-slate-600 font-medium">
                   {m.departmentName || 'General Assembly'}
                 </td>
-                <td className="px-4 py-3.5 text-slate-600">
-                  {m.phone}
+                <td className="px-4 py-3.5">
+                  {portalRole ? (
+                    <Badge variant={isMemberAdmin ? 'info' : 'neutral'} size="sm">
+                      {portalRole === 'super_admin' ? 'Super Admin' : isMemberAdmin ? 'Admin' : 'Member'}
+                    </Badge>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">Directory Only</span>
+                  )}
                 </td>
                 <td className="px-4 py-3.5">
                   <Badge variant={m.status === 'active' ? 'success' : 'danger'} size="sm">
@@ -341,6 +450,19 @@ export const MembersManagement: React.FC = () => {
                     >
                       <Edit className="w-4 h-4" />
                     </button>
+                    {portalRole && !isProtectedAdmin && (
+                      <button
+                        onClick={() => setRoleConfirmTarget({ member: m, nextRole: isMemberAdmin ? 'member' : 'admin' })}
+                        className={`p-1.5 rounded-lg ${
+                          isMemberAdmin
+                            ? 'text-indigo-600 hover:text-amber-700 hover:bg-amber-50'
+                            : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
+                        }`}
+                        title={isMemberAdmin ? 'Revoke Admin Role' : 'Make Admin'}
+                      >
+                        {isMemberAdmin ? <ShieldOff className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                      </button>
+                    )}
                     <button
                       onClick={() => handleToggleStatus(m)}
                       className={`p-1.5 rounded-lg ${
@@ -348,14 +470,15 @@ export const MembersManagement: React.FC = () => {
                           ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
                           : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
                       }`}
-                      title={m.status === 'active' ? 'Suspend Member' : 'Activate Member'}
+                      title={m.status === 'active' ? 'Suspend Member' : 'Approve & Activate Member'}
                     >
-                      {m.status === 'active' ? <UserX className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                      {m.status === 'active' ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
                     </button>
                   </div>
                 </td>
               </tr>
-            ))}
+            );
+            })}
 
             {paginatedMembers.length === 0 && (
               <tr>
@@ -370,19 +493,30 @@ export const MembersManagement: React.FC = () => {
 
       {/* MOBILE CARDS */}
       <div className="md:hidden space-y-3">
-        {paginatedMembers.map((m) => (
+        {paginatedMembers.map((m) => {
+          const portalRole = getMemberPortalRole(m);
+          const isMemberAdmin = portalRole === 'admin' || portalRole === 'super_admin';
+          const isProtectedAdmin = isEmailAdmin(m.email) || m.userId === firebaseUser?.uid;
+          return (
           <Card key={m.id} className="p-4 bg-white border-slate-200/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-3 min-w-0">
                 <Avatar name={m.fullName} photoUrl={m.photoUrl} size="md" />
-                <div>
-                  <h4 className="font-bold text-slate-900">{m.fullName}</h4>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-slate-900 truncate">{m.fullName}</h4>
                   <p className="text-[11px] font-mono text-slate-400">{m.membershipNumber}</p>
                 </div>
               </div>
-              <Badge variant={m.status === 'active' ? 'success' : 'danger'} size="sm">
-                {m.status === 'active' ? 'Active' : 'Suspended'}
-              </Badge>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <Badge variant={m.status === 'active' ? 'success' : 'danger'} size="sm">
+                  {m.status === 'active' ? 'Active' : 'Suspended'}
+                </Badge>
+                {portalRole && (
+                  <Badge variant={isMemberAdmin ? 'info' : 'neutral'} size="sm">
+                    {isMemberAdmin ? 'Admin' : 'Member'}
+                  </Badge>
+                )}
+              </div>
             </div>
 
             <div className="text-xs text-slate-600 space-y-1 pt-1 border-t border-slate-100">
@@ -391,7 +525,7 @@ export const MembersManagement: React.FC = () => {
               <p>Email: <span className="font-medium text-slate-800">{m.email}</span></p>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <Button
                 variant="outline"
                 size="sm"
@@ -409,6 +543,15 @@ export const MembersManagement: React.FC = () => {
               >
                 Edit
               </Button>
+              {portalRole && !isProtectedAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRoleConfirmTarget({ member: m, nextRole: isMemberAdmin ? 'member' : 'admin' })}
+                >
+                  {isMemberAdmin ? 'Revoke Admin' : 'Make Admin'}
+                </Button>
+              )}
               <Button
                 variant={m.status === 'active' ? 'danger' : 'success'}
                 size="sm"
@@ -418,7 +561,8 @@ export const MembersManagement: React.FC = () => {
               </Button>
             </div>
           </Card>
-        ))}
+          );
+        })}
       </div>
 
       {/* Pagination Bar */}
@@ -562,9 +706,25 @@ export const MembersManagement: React.FC = () => {
               <div>
                 <h3 className="text-lg font-bold text-slate-900">{activeMember.fullName}</h3>
                 <p className="text-xs font-mono font-bold text-emerald-700">{activeMember.membershipNumber}</p>
-                <Badge variant={activeMember.status === 'active' ? 'success' : 'danger'} size="sm" className="mt-1">
-                  {activeMember.status === 'active' ? 'Active' : 'Suspended'}
-                </Badge>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <Badge variant={activeMember.status === 'active' ? 'success' : 'danger'} size="sm">
+                    {activeMember.status === 'active' ? 'Active' : 'Suspended'}
+                  </Badge>
+                  {getMemberPortalRole(activeMember) && (
+                    <Badge
+                      variant={
+                        getMemberPortalRole(activeMember) === 'admin' || getMemberPortalRole(activeMember) === 'super_admin'
+                          ? 'info'
+                          : 'neutral'
+                      }
+                      size="sm"
+                    >
+                      {getMemberPortalRole(activeMember) === 'admin' || getMemberPortalRole(activeMember) === 'super_admin'
+                        ? 'Admin'
+                        : 'Member'}
+                    </Badge>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -578,14 +738,81 @@ export const MembersManagement: React.FC = () => {
               <p><strong>Joined Date:</strong> {activeMember.membershipDate}</p>
             </div>
 
-            <Button
-              type="button"
-              variant="primary"
-              className="w-full mt-2"
-              onClick={() => setIsDetailModalOpen(false)}
-            >
-              Close
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              {getMemberPortalRole(activeMember) && !isEmailAdmin(activeMember.email) && activeMember.userId !== firebaseUser?.uid && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    const isMemberAdmin =
+                      getMemberPortalRole(activeMember) === 'admin' ||
+                      getMemberPortalRole(activeMember) === 'super_admin';
+                    setIsDetailModalOpen(false);
+                    setRoleConfirmTarget({
+                      member: activeMember,
+                      nextRole: isMemberAdmin ? 'member' : 'admin'
+                    });
+                  }}
+                >
+                  {getMemberPortalRole(activeMember) === 'admin' || getMemberPortalRole(activeMember) === 'super_admin'
+                    ? 'Revoke Admin'
+                    : 'Make Admin'}
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="primary"
+                className="flex-1"
+                onClick={() => setIsDetailModalOpen(false)}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* CONFIRM ROLE CHANGE MODAL */}
+      {roleConfirmTarget && (
+        <Modal
+          isOpen={!!roleConfirmTarget}
+          onClose={() => !updatingRole && setRoleConfirmTarget(null)}
+          title={roleConfirmTarget.nextRole === 'admin' ? 'Grant Admin Privileges' : 'Revoke Admin Privileges'}
+          maxWidth="sm"
+        >
+          <div className="space-y-4 text-left">
+            <p className="text-xs text-slate-600 leading-relaxed">
+              {roleConfirmTarget.nextRole === 'admin' ? (
+                <>
+                  Are you sure you want to promote <strong className="text-slate-900">{roleConfirmTarget.member.fullName}</strong> ({roleConfirmTarget.member.email}) to <strong className="text-emerald-700">Admin</strong>? They will gain full access to the Admin Dashboard and church operations.
+                </>
+              ) : (
+                <>
+                  Are you sure you want to change <strong className="text-slate-900">{roleConfirmTarget.member.fullName}</strong> ({roleConfirmTarget.member.email}) back to <strong className="text-slate-900">Member</strong>? They will no longer be able to access the Admin Dashboard.
+                </>
+              )}
+            </p>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={updatingRole}
+                onClick={() => setRoleConfirmTarget(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant={roleConfirmTarget.nextRole === 'admin' ? 'primary' : 'danger'}
+                size="sm"
+                loading={updatingRole}
+                onClick={handleConfirmRoleChange}
+              >
+                {roleConfirmTarget.nextRole === 'admin' ? 'Confirm Make Admin' : 'Confirm Revoke Admin'}
+              </Button>
+            </div>
           </div>
         </Modal>
       )}
